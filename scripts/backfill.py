@@ -1,6 +1,6 @@
 # 지정 연도 범위의 주가 및 재무 데이터를 일괄 수집하는 백필 스크립트 (최초 1회 또는 누락 보완용)
 from pykrx import stock
-import OpenDartReader
+from OpenDartReader import OpenDartReader
 import pandas as pd
 from pathlib import Path
 import os
@@ -196,7 +196,7 @@ def main():
             print("DART_API_KEY가 설정되지 않아 재무 수집을 건너뜁니다.")
             skip_financials = True
         else:
-            dart = OpenDartReader.OpenDartReader(DART_API_KEY)
+            dart = OpenDartReader(DART_API_KEY)
 
     print(f"백필 시작: {start_year}~{end_year}")
     if skip_prices:

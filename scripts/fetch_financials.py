@@ -1,5 +1,5 @@
 # DART 전자공시에서 최근 분기/연간 재무제표를 수집하여 Parquet로 저장하는 스크립트
-import OpenDartReader
+from OpenDartReader import OpenDartReader
 import pandas as pd
 from pathlib import Path
 import os
@@ -94,7 +94,7 @@ def update_parquet(path, new_df, key_cols):
 
 
 def main():
-    dart = OpenDartReader.OpenDartReader(DART_API_KEY)
+    dart = OpenDartReader(DART_API_KEY)
     current_year = datetime.today().year
 
     path_q = Path("data/financials/quarterly.parquet")
