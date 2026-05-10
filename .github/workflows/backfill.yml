@@ -1,0 +1,56 @@
+name: 과거 데이터 백필
+
+on:
+  workflow_dispatch:
+    inputs:
+      start_year:
+        description: '시작 연도 (예: 2001)'
+        required: true
+        default: '2001'
+      end_year:
+        description: '종료 연도 (예: 2005) — 한 번에 5년 이내 권장'
+        required: true
+        default: '2005'
+      skip_prices:
+        description: '주가 수집 건너뜀'
+        type: boolean
+        default: false
+      skip_financials:
+        description: '재무 수집 건너뜀'
+        type: boolean
+        default: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: 백필 실행
+        env:
+          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+        run: |
+          ARGS="${{ github.event.inputs.start_year }} ${{ github.event.inputs.end_year }}"
+          if [ "${{ github.event.inputs.skip_prices }}" = "true" ]; then ARGS="$ARGS --skip-prices"; fi
+          if [ "${{ github.event.inputs.skip_financials }}" = "true" ]; then ARGS="$ARGS --skip-financials"; fi
+          python scripts/backfill.py $ARGS
+
+      - name: 백필 후 QoQ/YoY 재계산
+        if: ${{ github.event.inputs.skip_financials != 'true' }}
+        run: python scripts/calculate_changes.py
+
+      - name: 변경사항 커밋 및 푸시
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/
+          git diff --staged --quiet || git commit -m "백필: ${{ github.event.inputs.start_year }}-${{ github.event.inputs.end_year }}"
+          git push

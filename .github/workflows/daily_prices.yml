@@ -1,0 +1,35 @@
+name: 일별 주가 수집
+
+on:
+  schedule:
+    # KST 16:30 평일 = UTC 07:30 Mon-Fri
+    - cron: '30 7 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      date:
+        description: '수집 날짜 (YYYYMMDD, 비워두면 최근 거래일 자동 감지)'
+        required: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: 주가 수집
+        run: python scripts/fetch_prices.py ${{ github.event.inputs.date || '' }}
+
+      - name: 변경사항 커밋 및 푸시
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/prices/
+          git diff --staged --quiet || git commit -m "주가 업데이트: $(date -u +%Y%m%d)"
+          git push

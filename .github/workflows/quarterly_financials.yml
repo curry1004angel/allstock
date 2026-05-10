@@ -1,0 +1,36 @@
+name: 재무 데이터 수집 및 변화율 계산
+
+on:
+  schedule:
+    # 매주 토요일 KST 10:00 = UTC 01:00
+    - cron: '0 1 * * 6'
+  workflow_dispatch:
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: 재무제표 수집
+        env:
+          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+        run: python scripts/fetch_financials.py
+
+      - name: QoQ/YoY 계산
+        run: python scripts/calculate_changes.py
+
+      - name: 변경사항 커밋 및 푸시
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/financials/
+          git diff --staged --quiet || git commit -m "재무 업데이트: $(date -u +%Y%m%d)"
+          git push

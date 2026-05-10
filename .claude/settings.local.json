@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(ls -Force \"e:\\\\클로드\\\\code\\\\allstock\" | ForEach-Object { $_.FullName })",
+      "PowerShell(Get-ChildItem -Path \"e:\\\\클로드\\\\code\\\\allstock\" -Force -Recurse | Select-Object FullName, @{Name=\"Type\";Expression={if\\($_.PSIsContainer\\){\"DIR\"}else{\"FILE\"}}} | Format-List)",
+      "PowerShell(\\(Get-Item -Path \"e:\\\\클로드\\\\code\"\\).GetFiles\\(\\) | Select-Object Name)"
+    ]
+  }
+}
