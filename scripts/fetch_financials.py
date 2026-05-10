@@ -1,5 +1,8 @@
-# DART 전자공시에서 최근 분기/연간 재무제표를 수집하여 Parquet로 저장하는 스크립트
-from OpenDartReader import OpenDartReader
+# DART 공식 API로 분기/연간 재무제표를 수집하여 Parquet로 저장하는 스크립트
+import requests
+import zipfile
+import io
+import xml.etree.ElementTree as ET
 import pandas as pd
 from pathlib import Path
 import os
@@ -8,15 +11,7 @@ from datetime import datetime
 
 
 DART_API_KEY = os.environ["DART_API_KEY"]
-
-# 수집 대상 계정명 (포함 여부로 판단)
-TARGET_ACCOUNTS = {
-    "매출액": "revenue",
-    "영업이익": "operating_profit",
-    "주당순이익": "eps",
-    "기본주당이익": "eps",
-    "기본주당순이익": "eps",
-}
+DART_BASE = "https://opendart.fss.or.kr/api"
 
 REPRT_CODES = {
     "1Q": "11013",
@@ -25,9 +20,44 @@ REPRT_CODES = {
     "annual": "11011",
 }
 
+ACCOUNT_MAP = {
+    "매출액": "revenue",
+    "영업이익": "operating_profit",
+    "주당이익": "eps",
+}
+
+
+def get_corp_code_map(api_key):
+    resp = requests.get(f"{DART_BASE}/corpCode.xml", params={"crtfc_key": api_key}, timeout=30)
+    resp.raise_for_status()
+    zf = zipfile.ZipFile(io.BytesIO(resp.content))
+    xml_data = zf.read("CORPCODE.xml")
+    root = ET.fromstring(xml_data)
+    mapping = {}
+    for item in root.findall("list"):
+        stock_code = (item.findtext("stock_code") or "").strip()
+        corp_code = (item.findtext("corp_code") or "").strip()
+        if stock_code and len(stock_code) == 6:
+            mapping[corp_code] = stock_code
+    return mapping
+
+
+def fetch_batch(api_key, corp_codes, year, reprt_code):
+    params = {
+        "crtfc_key": api_key,
+        "corp_code": ",".join(corp_codes),
+        "bsns_year": str(year),
+        "reprt_code": reprt_code,
+    }
+    resp = requests.get(f"{DART_BASE}/fnlttMultiAcntSj.json", params=params, timeout=30)
+    data = resp.json()
+    if data.get("status") != "000":
+        return []
+    return data.get("list", [])
+
 
 def parse_amount(val):
-    if pd.isna(val):
+    if not val:
         return None
     try:
         return int(str(val).replace(",", "").replace(" ", ""))
@@ -35,49 +65,38 @@ def parse_amount(val):
         return None
 
 
-def fetch_quarter_data(dart, year, quarter, reprt_code):
-    for fs_div in ("CFS", "OFS"):
+def fetch_quarter(api_key, corp_map, year, quarter, reprt_code):
+    corp_codes = list(corp_map.keys())
+    rows = []
+    total = (len(corp_codes) + 99) // 100
+    for i in range(0, len(corp_codes), 100):
+        batch = corp_codes[i:i + 100]
         try:
-            df = dart.finstate_all(str(year), reprt_code, fs_div=fs_div)
-            time.sleep(1)
+            items = fetch_batch(api_key, batch, year, reprt_code)
         except Exception as e:
-            print(f"  {year} {quarter} {fs_div} 오류: {e}")
+            print(f"  배치 {i // 100 + 1}/{total} 오류: {e}")
+            time.sleep(2)
             continue
-
-        if df is None or df.empty:
-            continue
-
-        rows = []
-        seen = set()
-        for _, row in df.iterrows():
-            acct_nm = str(row.get("account_nm", ""))
-            matched = next((eng for kor, eng in TARGET_ACCOUNTS.items() if kor in acct_nm), None)
-            if matched is None:
+        for item in items:
+            acct_nm = item.get("account_nm", "")
+            matched = next((v for k, v in ACCOUNT_MAP.items() if k in acct_nm), None)
+            if not matched:
                 continue
-
-            ticker = str(row.get("stock_code", "")).strip()
-            key = (ticker, matched)
-            if key in seen:
+            ticker = corp_map.get(item.get("corp_code", ""), "")
+            if not ticker:
                 continue
-            seen.add(key)
-
-            amount = parse_amount(row.get("thstrm_amount"))
+            amount = parse_amount(item.get("thstrm_amount"))
             if amount is None:
                 continue
-
             rows.append({
                 "ticker": ticker,
                 "year": int(year),
                 "quarter": quarter,
-                "fs_div": fs_div,
                 "account": matched,
                 "amount": amount,
             })
-
-        if rows:
-            return pd.DataFrame(rows)
-
-    return pd.DataFrame()
+        time.sleep(0.5)
+    return pd.DataFrame(rows)
 
 
 def update_parquet(path, new_df, key_cols):
@@ -90,31 +109,28 @@ def update_parquet(path, new_df, key_cols):
     combined = combined.drop_duplicates(subset=key_cols, keep="last")
     combined = combined.sort_values(key_cols).reset_index(drop=True)
     combined.to_parquet(path, index=False, compression="snappy")
-    print(f"  {path.name} 저장: {len(combined)}행")
+    print(f"  {path.name}: {len(combined)}행 저장")
 
 
 def main():
-    dart = OpenDartReader(DART_API_KEY)
-    current_year = datetime.today().year
+    print("corp_code 매핑 로드 중...")
+    corp_map = get_corp_code_map(DART_API_KEY)
+    print(f"  상장 기업 {len(corp_map)}개")
 
+    current_year = datetime.today().year
     path_q = Path("data/financials/quarterly.parquet")
     path_a = Path("data/financials/annual.parquet")
 
-    quarterly_rows = []
-    annual_rows = []
+    quarterly_rows, annual_rows = [], []
 
-    # 최근 2개 연도만 갱신 (증분 업데이트)
     for year in (current_year - 1, current_year):
         for quarter, reprt_code in REPRT_CODES.items():
             print(f"{year} {quarter} 수집 중...")
-            df = fetch_quarter_data(dart, year, quarter, reprt_code)
+            df = fetch_quarter(DART_API_KEY, corp_map, year, quarter, reprt_code)
             if df.empty:
-                print(f"  데이터 없음")
+                print("  데이터 없음")
                 continue
-            if quarter == "annual":
-                annual_rows.append(df)
-            else:
-                quarterly_rows.append(df)
+            (annual_rows if quarter == "annual" else quarterly_rows).append(df)
 
     if quarterly_rows:
         update_parquet(path_q, pd.concat(quarterly_rows, ignore_index=True),
