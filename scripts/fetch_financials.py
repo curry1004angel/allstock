@@ -51,7 +51,9 @@ def fetch_batch(api_key, corp_codes, year, reprt_code):
     }
     resp = requests.get(f"{DART_BASE}/fnlttMultiAcntSj.json", params=params, timeout=30)
     data = resp.json()
-    if data.get("status") != "000":
+    status = data.get("status")
+    if status != "000":
+        print(f"  DART 응답: status={status}, message={data.get('message', '')}")
         return []
     return data.get("list", [])
 
