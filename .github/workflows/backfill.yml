@@ -34,6 +34,9 @@ jobs:
 
       - run: pip install -r requirements.txt
 
+      - name: 종목 목록 생성
+        run: python scripts/update_stock_list.py
+
       - name: 백필 실행
         env:
           DART_API_KEY: ${{ secrets.DART_API_KEY }}
