@@ -101,15 +101,17 @@ def get_corp_code_map(api_key):
 
 def fetch_batch(api_key, corp_codes, year, reprt_code):
     url = (
-        f"{DART_BASE}/fnlttMultiAcntSj.json"
+        f"{DART_BASE}/fnlttMultiAcnt.json"
         f"?crtfc_key={api_key}&corp_code={','.join(corp_codes)}"
         f"&bsns_year={year}&reprt_code={reprt_code}"
     )
-    resp = requests.get(url, timeout=30)
-    data = resp.json()
-    status = data.get("status")
-    if status != "000":
-        print(f"      DART 응답: status={status}, message={data.get('message', '')}")
+    try:
+        data = requests.get(url, timeout=30).json()
+    except Exception as e:
+        print(f"      요청 오류: {e}")
+        return []
+    if data.get("status") != "000":
+        print(f"      DART 응답: status={data.get('status')}, message={data.get('message', '')}")
         return []
     return data.get("list", [])
 
@@ -124,9 +126,9 @@ def parse_amount(val):
 
 
 def fetch_financials_for_year(api_key, corp_map, year):
-    # DART 재무 API는 IFRS 도입 이후(2010년~)만 안정적으로 제공
-    if year < 2010:
-        print(f"    {year}: DART API는 2010년 미만 재무 데이터 미지원, 건너뜀.")
+    # DART 다중회사 주요계정 API는 2015년 이후만 제공
+    if year < 2015:
+        print(f"    {year}: DART API는 2015년 미만 재무 데이터 미지원, 건너뜀.")
         return
 
     path_q = Path("data/financials/quarterly.parquet")
@@ -138,18 +140,14 @@ def fetch_financials_for_year(api_key, corp_map, year):
 
     corp_codes = list(corp_map.keys())
     quarterly_rows, annual_rows = [], []
+    total = (len(corp_codes) + 99) // 100
 
     for quarter, reprt_code in REPRT_CODES.items():
         print(f"    {year} {quarter} 재무 수집 중...")
         rows = []
         for i in range(0, len(corp_codes), 100):
             batch = corp_codes[i:i + 100]
-            try:
-                items = fetch_batch(api_key, batch, year, reprt_code)
-            except Exception as e:
-                print(f"      배치 오류: {e}")
-                time.sleep(2)
-                continue
+            items = fetch_batch(api_key, batch, year, reprt_code)
             for item in items:
                 acct_nm = item.get("account_nm", "")
                 matched = next((v for k, v in ACCOUNT_MAP.items() if k in acct_nm), None)

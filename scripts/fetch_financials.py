@@ -44,15 +44,17 @@ def get_corp_code_map(api_key):
 
 def fetch_batch(api_key, corp_codes, year, reprt_code):
     url = (
-        f"{DART_BASE}/fnlttMultiAcntSj.json"
+        f"{DART_BASE}/fnlttMultiAcnt.json"
         f"?crtfc_key={api_key}&corp_code={','.join(corp_codes)}"
         f"&bsns_year={year}&reprt_code={reprt_code}"
     )
-    resp = requests.get(url, timeout=30)
-    data = resp.json()
-    status = data.get("status")
-    if status != "000":
-        print(f"  DART 응답: status={status}, message={data.get('message', '')}")
+    try:
+        data = requests.get(url, timeout=30).json()
+    except Exception as e:
+        print(f"  요청 오류: {e}")
+        return []
+    if data.get("status") != "000":
+        print(f"  DART 응답: status={data.get('status')}, message={data.get('message', '')}")
         return []
     return data.get("list", [])
 
@@ -72,12 +74,7 @@ def fetch_quarter(api_key, corp_map, year, quarter, reprt_code):
     total = (len(corp_codes) + 99) // 100
     for i in range(0, len(corp_codes), 100):
         batch = corp_codes[i:i + 100]
-        try:
-            items = fetch_batch(api_key, batch, year, reprt_code)
-        except Exception as e:
-            print(f"  배치 {i // 100 + 1}/{total} 오류: {e}")
-            time.sleep(2)
-            continue
+        items = fetch_batch(api_key, batch, year, reprt_code)
         for item in items:
             acct_nm = item.get("account_nm", "")
             matched = next((v for k, v in ACCOUNT_MAP.items() if k in acct_nm), None)
