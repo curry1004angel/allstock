@@ -43,13 +43,12 @@ def get_corp_code_map(api_key):
 
 
 def fetch_batch(api_key, corp_codes, year, reprt_code):
-    params = {
-        "crtfc_key": api_key,
-        "corp_code": ",".join(corp_codes),
-        "bsns_year": str(year),
-        "reprt_code": reprt_code,
-    }
-    resp = requests.get(f"{DART_BASE}/fnlttMultiAcntSj.json", params=params, timeout=30)
+    url = (
+        f"{DART_BASE}/fnlttMultiAcntSj.json"
+        f"?crtfc_key={api_key}&corp_code={','.join(corp_codes)}"
+        f"&bsns_year={year}&reprt_code={reprt_code}"
+    )
+    resp = requests.get(url, timeout=30)
     data = resp.json()
     status = data.get("status")
     if status != "000":
