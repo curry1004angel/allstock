@@ -25,7 +25,7 @@ REPRT_CODES = {
 ACCOUNT_MAP = {
     "매출액": "revenue",
     "영업이익": "operating_profit",
-    "주당이익": "eps",
+    "당기순이익": "net_income",
 }
 
 
