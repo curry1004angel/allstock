@@ -28,8 +28,16 @@ ACCOUNT_MAP = {
 
 
 def get_corp_code_map(api_key):
-    resp = requests.get(f"{DART_BASE}/corpCode.xml", params={"crtfc_key": api_key}, timeout=30)
-    resp.raise_for_status()
+    for attempt in range(3):
+        try:
+            resp = requests.get(f"{DART_BASE}/corpCode.xml", params={"crtfc_key": api_key}, timeout=120)
+            resp.raise_for_status()
+            break
+        except Exception as e:
+            print(f"  corpCode.xml 다운로드 실패 ({attempt+1}/3): {e}")
+            if attempt == 2:
+                raise
+            time.sleep(5)
     zf = zipfile.ZipFile(io.BytesIO(resp.content))
     xml_data = zf.read("CORPCODE.xml")
     root = ET.fromstring(xml_data)
