@@ -83,7 +83,10 @@ def fetch_quarter(api_key, corp_map, year, quarter, reprt_code):
     for i in range(0, len(corp_codes), 100):
         batch = corp_codes[i:i + 100]
         items = fetch_batch(api_key, batch, year, reprt_code)
+        # CFS(연결) 우선, 없으면 OFS(별도) 폴백
+        batch_best = {}  # (ticker, account) -> (fs_div, amount)
         for item in items:
+            fs_div = item.get("fs_div", "OFS")
             acct_nm = item.get("account_nm", "")
             matched = next((v for k, v in ACCOUNT_MAP.items() if k in acct_nm), None)
             if not matched:
@@ -94,6 +97,10 @@ def fetch_quarter(api_key, corp_map, year, quarter, reprt_code):
             amount = parse_amount(item.get("thstrm_amount"))
             if amount is None:
                 continue
+            key = (ticker, matched)
+            if key not in batch_best or fs_div == "CFS":
+                batch_best[key] = (fs_div, amount)
+        for (ticker, matched), (_, amount) in batch_best.items():
             rows.append({
                 "ticker": ticker,
                 "year": int(year),
