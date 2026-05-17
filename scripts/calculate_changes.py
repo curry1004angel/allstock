@@ -3,13 +3,45 @@ import pandas as pd
 from pathlib import Path
 
 
-QUARTER_ORDER = {"1Q": 1, "2Q": 2, "3Q": 3, "annual": 4}
+QUARTER_ORDER = {"1Q": 1, "2Q": 2, "3Q": 3, "4Q": 4}
 
 
 def pct_change(current, previous):
     if previous is None or previous == 0 or pd.isna(previous):
         return None
     return round((current - previous) / abs(previous) * 100, 2)
+
+
+def generate_q4():
+    path_q = Path("data/financials/quarterly.parquet")
+    path_a = Path("data/financials/annual.parquet")
+    if not path_q.exists() or not path_a.exists():
+        return
+
+    q = pd.read_parquet(path_q)
+    a = pd.read_parquet(path_a)
+
+    # 기존 4Q 행 제거 후 재생성
+    q = q[q["quarter"] != "4Q"].copy()
+
+    q123_sum = (
+        q.groupby(["ticker", "year", "account"])["amount"]
+        .sum()
+        .reset_index()
+        .rename(columns={"amount": "q123_sum"})
+    )
+    merged = a[["ticker", "year", "account", "amount"]].merge(
+        q123_sum, on=["ticker", "year", "account"], how="inner"
+    )
+    merged["amount"] = merged["amount"] - merged["q123_sum"]
+    merged["quarter"] = "4Q"
+    merged = merged.drop(columns=["q123_sum"])
+
+    combined = pd.concat([q, merged[["ticker", "year", "quarter", "account", "amount"]]], ignore_index=True)
+    combined.sort_values(["ticker", "year", "quarter", "account"]).reset_index(drop=True).to_parquet(
+        path_q, index=False, compression="snappy"
+    )
+    print(f"4Q 생성 완료: {len(merged)}행 추가 → 총 {len(combined)}행")
 
 
 def process_quarterly():
@@ -52,5 +84,6 @@ def process_annual():
 
 
 if __name__ == "__main__":
+    generate_q4()
     process_quarterly()
     process_annual()
