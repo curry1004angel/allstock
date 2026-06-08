@@ -1,0 +1,39 @@
+name: 월간 수정주가 재동기화
+
+# 일별 수집은 과거를 소급 수정하지 않아, 병합·분할·감자가 일어나면 과거 가격이
+# 옛 원주가로 박제된다. 월 1회 최근 3년치를 수정주가로 다시 받아 덮어써(backfill의
+# drop_duplicates keep=last) 이 왜곡을 바로잡고, 스크리닝 결과도 재계산한다.
+
+on:
+  schedule:
+    # 매월 1일 KST 06:00 = UTC 21:00 (전날)
+    - cron: '0 21 1 * *'
+  workflow_dispatch:
+
+jobs:
+  resync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: 최근 3년 수정주가 재동기화
+        run: python scripts/backfill.py $(( $(date +%Y) - 2 )) $(date +%Y) --skip-financials
+
+      - name: 트렌드 템플릿 재계산
+        run: python scripts/trend_template.py
+
+      - name: 변경사항 커밋 및 푸시
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/prices/ data/screener/
+          git diff --staged --quiet || git commit -m "월간 수정주가 재동기화: $(date -u +%Y%m)"
+          git pull --rebase
+          git push
