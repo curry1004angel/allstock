@@ -84,8 +84,17 @@ def main():
         df["rs_line_30"] = df.groupby("ticker", sort=False)["rs_line"].shift(30)
         df["rs_line_65"] = df.groupby("ticker", sort=False)["rs_line"].shift(65)
 
+    # 단기 안전장치: 최근 1년 내 일간 ±35% 초과 급변(가격제한폭 ±30% 초과)은
+    # 병합·분할·감자·권리락 신호다. 해당 종목은 수정주가 미반영 의심으로 플래그한다.
+    # (월간 재동기화로 수정주가가 반영되면 급변이 사라져 플래그가 자동 해제된다.)
+    df["chg"] = df.groupby("ticker", sort=False)["close"].pct_change().abs()
+    recent = df.groupby("ticker", sort=False).tail(252)
+    warn = (recent.groupby("ticker")["chg"].max() > 0.35).rename("data_warning")
+
     # 종목별 최신 거래일 한 줄만 추출
     latest = df.drop_duplicates("ticker", keep="last").copy()
+    latest = latest.merge(warn, on="ticker", how="left")
+    latest["data_warning"] = latest["data_warning"].fillna(False)
 
     # RS 등급: IBD 근사식 → 전 종목 백분위(1~99)
     latest["rs_raw"] = (
@@ -134,10 +143,11 @@ def main():
         "date", "ticker", "name", "market", "close",
         "ma50", "ma150", "ma200", "low_52w", "high_52w",
         "pct_above_low", "pct_below_high", "rs_rating", "rs_line_up",
-        *CONDS, "pass_count", "pass_all",
+        *CONDS, "pass_count", "pass_all", "data_warning",
     ]
+    # 통과 우선 → 데이터 정상 우선 → RS 높은 순
     result = latest[out_cols].sort_values(
-        ["pass_all", "rs_rating"], ascending=[False, False]
+        ["pass_all", "data_warning", "rs_rating"], ascending=[False, True, False]
     ).reset_index(drop=True)
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -145,8 +155,13 @@ def main():
     result.to_csv(out_path, index=False, encoding="utf-8-sig")
 
     as_of = result["date"].iloc[0] if len(result) else "?"
-    n_pass = int(result["pass_all"].sum())
-    print(f"기준일 {as_of}: 전체 {len(result)}종목 중 8개 조건 통과 {n_pass}종목 -> {out_path}")
+    passed = result[result["pass_all"]]
+    n_pass = len(passed)
+    n_warn = int(passed["data_warning"].sum())
+    print(
+        f"기준일 {as_of}: 전체 {len(result)}종목 중 8개 조건 통과 {n_pass}종목 "
+        f"(수정주가 의심 {n_warn}종목 플래그) -> {out_path}"
+    )
 
 
 if __name__ == "__main__":
