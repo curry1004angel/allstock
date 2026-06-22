@@ -80,6 +80,9 @@ def main():
     has_rs_line = kospi is not None
     if has_rs_line:
         df = df.merge(kospi, on="date", how="left")
+        # 코스피 지수가 개별 종목 가격보다 하루 늦게 갱신되면 최신일 kospi가 비어 최신 행 rs_line이
+        # NaN→rs_line_up이 전부 False로 깔린다. 직전일 지수로 채워 막는다.
+        df["kospi"] = df.groupby("ticker", sort=False)["kospi"].ffill()
         df["rs_line"] = df["close"] / df["kospi"]
         df["rs_line_30"] = df.groupby("ticker", sort=False)["rs_line"].shift(30)
         df["rs_line_65"] = df.groupby("ticker", sort=False)["rs_line"].shift(65)
