@@ -170,16 +170,20 @@ def fetch_financials_for_year(api_key, corp_map, year):
                 amount = parse_amount(item.get("thstrm_amount"))
                 if amount is None:
                     continue
+                # 당기누적금액(연초~해당분기). 3Q 누적 = 1~3Q 합 공시값이라
+                # 분기 일부 누락 연도의 4Q 도출(generate_q4)에 쓰인다.
+                cum = parse_amount(item.get("thstrm_add_amount"))
                 key = (ticker, matched)
                 if key not in batch_best or fs_div == "CFS":
-                    batch_best[key] = (fs_div, amount)
-            for (ticker, matched), (_, amount) in batch_best.items():
+                    batch_best[key] = (fs_div, amount, cum)
+            for (ticker, matched), (_, amount, cum) in batch_best.items():
                 rows.append({
                     "ticker": ticker,
                     "year": int(year),
                     "quarter": quarter,
                     "account": matched,
                     "amount": amount,
+                    "cum_amount": cum,
                 })
             time.sleep(0.5)
 
@@ -187,7 +191,10 @@ def fetch_financials_for_year(api_key, corp_map, year):
             print(f"      데이터 없음")
             continue
 
-        (annual_rows if quarter == "annual" else quarterly_rows).append(pd.DataFrame(rows))
+        df = pd.DataFrame(rows)
+        if quarter == "annual":
+            df = df.drop(columns=["cum_amount"])  # 연간에는 누적 개념 없음
+        (annual_rows if quarter == "annual" else quarterly_rows).append(df)
 
     def save(existing, new_list, path, key_cols):
         if not new_list:

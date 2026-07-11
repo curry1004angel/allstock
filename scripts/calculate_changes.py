@@ -29,20 +29,34 @@ def generate_q4():
     # 기존 4Q 행 제거 후 재생성
     q = q[q["quarter"] != "4Q"].copy()
 
-    # 플로우 계정(손익·현금흐름)만 4Q = 연간 − (1~3Q 합)으로 도출
+    # 플로우 계정(손익·현금흐름)만 4Q = 연간 − (1~3Q 합)으로 도출.
+    # 1~3Q가 일부 누락된 연도는 합 대신 3Q 보고서의 누적금액(= 1~3Q 합 공시값)을 쓰고,
+    # 그마저 없으면 4Q 금액을 결측(NaN)으로 남긴다 — 누락 분기 금액이 4Q에 섞여
+    # 과대 표시되는 것을 막되, 행 자체를 빼면 위치 기반 shift(1) 전년 비교가
+    # 연도를 건너뛰며 또 다른 왜곡을 만들므로 행은 유지한다.
+    keys = ["ticker", "year", "account"]
     flow_q = q[~q["account"].isin(BS_ACCOUNTS)]
-    q123_sum = (
-        flow_q.groupby(["ticker", "year", "account"])["amount"]
-        .sum()
-        .reset_index()
-        .rename(columns={"amount": "q123_sum"})
-    )
-    merged = a[~a["account"].isin(BS_ACCOUNTS)][["ticker", "year", "account", "amount"]].merge(
-        q123_sum, on=["ticker", "year", "account"], how="inner"
-    )
-    merged["amount"] = merged["amount"] - merged["q123_sum"]
+    stats = flow_q.groupby(keys)["amount"].agg(q123_sum="sum", n_q="count").reset_index()
+    if "cum_amount" in flow_q.columns:
+        cum3 = flow_q.loc[flow_q["quarter"] == "3Q", keys + ["cum_amount"]]
+        stats = stats.merge(cum3.rename(columns={"cum_amount": "q3_cum"}), on=keys, how="left")
+    else:
+        stats["q3_cum"] = float("nan")  # 누적 미수집 데이터(백필 전) 호환
+
+    merged = a[~a["account"].isin(BS_ACCOUNTS)][keys + ["amount"]].merge(stats, on=keys, how="inner")
+    q123 = merged["q123_sum"].where(merged["n_q"] == 3, merged["q3_cum"])
+    merged["amount"] = merged["amount"] - q123
     merged["quarter"] = "4Q"
-    merged = merged.drop(columns=["q123_sum"])
+
+    # 공시 정정 등으로 3Q 누적 ≠ 1~3Q 합인 연도 감지 (완전 연도는 계속 합을 쓰므로 경고만)
+    check = merged[(merged["n_q"] == 3) & merged["q3_cum"].notna()]
+    n_diff = int((check["q123_sum"] != check["q3_cum"]).sum())
+    if n_diff:
+        print(f"경고: 3Q 누적금액 ≠ 1~3Q 합 {n_diff}건")
+
+    n_cum = int(((merged["n_q"] < 3) & merged["q3_cum"].notna()).sum())
+    n_nan = int(merged["amount"].isna().sum())
+    merged = merged[["ticker", "year", "quarter", "account", "amount"]]
 
     # 재무상태표 계정 4Q = 사업보고서 연말 잔액 그대로
     bs4 = a[a["account"].isin(BS_ACCOUNTS)][["ticker", "year", "account", "amount"]].copy()
@@ -53,7 +67,8 @@ def generate_q4():
     combined.sort_values(["ticker", "year", "quarter", "account"]).reset_index(drop=True).to_parquet(
         path_q, index=False, compression="snappy"
     )
-    print(f"4Q 생성 완료: 플로우 {len(merged)}행 + 재무상태표 {len(bs4)}행 추가 → 총 {len(combined)}행")
+    print(f"4Q 생성 완료: 플로우 {len(merged)}행(3Q누적 복원 {n_cum}·결측 {n_nan}) "
+          f"+ 재무상태표 {len(bs4)}행 추가 → 총 {len(combined)}행")
 
 
 def process_quarterly():
