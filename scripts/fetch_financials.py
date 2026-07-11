@@ -26,6 +26,16 @@ ACCOUNT_MAP = {
     "당기순이익": "net_income",
 }
 
+# 재무상태표 주요계정 — 같은 API 응답에 이미 포함돼 있어 추가 호출 없이 수집.
+# 부분일치로 하면 "유동자산"이 "비유동자산"에도 걸리므로 정확일치로만 매칭한다.
+ACCOUNT_MAP_EXACT = {
+    "자산총계": "total_assets",
+    "부채총계": "total_liabilities",
+    "자본총계": "total_equity",
+    "유동자산": "current_assets",
+    "유동부채": "current_liabilities",
+}
+
 
 def get_corp_code_map(api_key):
     for attempt in range(3):
@@ -88,7 +98,8 @@ def fetch_quarter(api_key, corp_map, year, quarter, reprt_code):
         for item in items:
             fs_div = item.get("fs_div", "OFS")
             acct_nm = item.get("account_nm", "")
-            matched = next((v for k, v in ACCOUNT_MAP.items() if k in acct_nm), None)
+            matched = ACCOUNT_MAP_EXACT.get(acct_nm.strip()) or next(
+                (v for k, v in ACCOUNT_MAP.items() if k in acct_nm), None)
             if not matched:
                 continue
             ticker = corp_map.get(item.get("corp_code", ""), "")
