@@ -7,6 +7,7 @@ import pandas as pd
 from pathlib import Path
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 
@@ -88,13 +89,11 @@ def parse_amount(val):
 
 def fetch_quarter(api_key, corp_map, year, quarter, reprt_code):
     corp_codes = list(corp_map.keys())
-    rows = []
-    total = (len(corp_codes) + 99) // 100
-    for i in range(0, len(corp_codes), 100):
-        batch = corp_codes[i:i + 100]
+
+    def collect(batch):
         items = fetch_batch(api_key, batch, year, reprt_code)
         # CFS(연결) 우선, 없으면 OFS(별도) 폴백
-        batch_best = {}  # (ticker, account) -> (fs_div, amount)
+        batch_best = {}  # (ticker, account) -> (fs_div, amount, cum)
         for item in items:
             fs_div = item.get("fs_div", "OFS")
             acct_nm = item.get("account_nm", "")
@@ -114,16 +113,22 @@ def fetch_quarter(api_key, corp_map, year, quarter, reprt_code):
             key = (ticker, matched)
             if key not in batch_best or fs_div == "CFS":
                 batch_best[key] = (fs_div, amount, cum)
-        for (ticker, matched), (_, amount, cum) in batch_best.items():
-            rows.append({
-                "ticker": ticker,
-                "year": int(year),
-                "quarter": quarter,
-                "account": matched,
-                "amount": amount,
-                "cum_amount": cum,
-            })
-        time.sleep(0.5)
+        return [{
+            "ticker": ticker,
+            "year": int(year),
+            "quarter": quarter,
+            "account": matched,
+            "amount": amount,
+            "cum_amount": cum,
+        } for (ticker, matched), (_, amount, cum) in batch_best.items()]
+
+    # DART 배치 응답이 느려(건당 ~30초, 순차로는 8개 기간에 3시간+) 3개 동시 호출.
+    # 동시 3개여도 분당 수 건 수준이라 서버 부하·쿼터와 무관하다.
+    batches = [corp_codes[i:i + 100] for i in range(0, len(corp_codes), 100)]
+    rows = []
+    with ThreadPoolExecutor(max_workers=3) as ex:
+        for out in ex.map(collect, batches):
+            rows.extend(out)
     return pd.DataFrame(rows)
 
 

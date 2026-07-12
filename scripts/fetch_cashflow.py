@@ -17,7 +17,8 @@ import requests
 from fetch_financials import DART_BASE, get_corp_code_map, parse_amount, update_parquet
 
 DART_API_KEY = os.environ["DART_API_KEY"]
-MAX_CALLS = 15000  # 일일 쿼터 내 안전 상한 (fetch_financials 몫 여유 포함)
+MAX_CALLS = 15000    # 일일 쿼터 내 안전 상한 (fetch_financials 몫 여유 포함)
+MAX_MINUTES = 150    # 워크플로 작업 한도(6h) 안에서 수집분이 반드시 저장되도록 하는 시간 상한
 
 # 표준계정ID 우선 매칭, 없으면 공백 제거한 계정명 정확일치 폴백
 CF_ACCOUNT_IDS = {
@@ -114,6 +115,7 @@ def main():
 
     current_year = datetime.today().year
     calls = 0
+    started = time.time()
     rows_q, rows_a = [], []
     stopped = False
 
@@ -133,7 +135,7 @@ def main():
                         continue
                 elif (ticker, year, quarter) in have_q:
                     continue
-                if calls >= MAX_CALLS:
+                if calls >= MAX_CALLS or time.time() - started > MAX_MINUTES * 60:
                     stopped = True
                     break
                 try:
@@ -166,7 +168,7 @@ def main():
             break
 
     if stopped:
-        print(f"호출 상한({MAX_CALLS}) 도달 — 남은 종목은 다음 실행이 이어받음")
+        print(f"상한 도달(호출 {calls}/{MAX_CALLS} 또는 {MAX_MINUTES}분) — 남은 종목은 다음 실행이 이어받음")
     if rows_q:
         update_parquet(path_q, pd.DataFrame(rows_q), ["ticker", "year", "quarter", "account"])
     if rows_a:

@@ -9,6 +9,7 @@ from pathlib import Path
 import os
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 
@@ -162,12 +163,11 @@ def fetch_financials_for_year(api_key, corp_map, year):
 
     for quarter, reprt_code in REPRT_CODES.items():
         print(f"    {year} {quarter} 재무 수집 중...")
-        rows = []
-        for i in range(0, len(corp_codes), 100):
-            batch = corp_codes[i:i + 100]
+
+        def collect(batch, quarter=quarter, reprt_code=reprt_code):
             items = fetch_batch(api_key, batch, year, reprt_code)
             # CFS(연결) 우선, 없으면 OFS(별도) 폴백
-            batch_best = {}  # (ticker, account) -> (fs_div, amount)
+            batch_best = {}  # (ticker, account) -> (fs_div, amount, cum)
             for item in items:
                 fs_div = item.get("fs_div", "OFS")
                 acct_nm = item.get("account_nm", "")
@@ -187,16 +187,22 @@ def fetch_financials_for_year(api_key, corp_map, year):
                 key = (ticker, matched)
                 if key not in batch_best or fs_div == "CFS":
                     batch_best[key] = (fs_div, amount, cum)
-            for (ticker, matched), (_, amount, cum) in batch_best.items():
-                rows.append({
-                    "ticker": ticker,
-                    "year": int(year),
-                    "quarter": quarter,
-                    "account": matched,
-                    "amount": amount,
-                    "cum_amount": cum,
-                })
-            time.sleep(0.5)
+            return [{
+                "ticker": ticker,
+                "year": int(year),
+                "quarter": quarter,
+                "account": matched,
+                "amount": amount,
+                "cum_amount": cum,
+            } for (ticker, matched), (_, amount, cum) in batch_best.items()]
+
+        # DART 배치 응답이 느려(건당 ~30초, 순차로는 워크플로 350분 초과) 3개 동시 호출.
+        # 동시 3개여도 분당 수 건 수준이라 서버 부하·쿼터와 무관하다.
+        batches = [corp_codes[i:i + 100] for i in range(0, len(corp_codes), 100)]
+        rows = []
+        with ThreadPoolExecutor(max_workers=3) as ex:
+            for out in ex.map(collect, batches):
+                rows.extend(out)
 
         if not rows:
             print(f"      데이터 없음")
