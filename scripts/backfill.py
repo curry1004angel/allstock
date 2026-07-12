@@ -28,6 +28,16 @@ ACCOUNT_MAP = {
     "당기순이익": "net_income",
 }
 
+# 재무상태표 주요계정 — 같은 응답에 포함(추가 호출 0건). fetch_financials와 동일하게
+# "유동자산"이 "비유동자산"에 걸리지 않도록 정확일치로만 매칭한다.
+ACCOUNT_MAP_EXACT = {
+    "자산총계": "total_assets",
+    "부채총계": "total_liabilities",
+    "자본총계": "total_equity",
+    "유동자산": "current_assets",
+    "유동부채": "current_liabilities",
+}
+
 
 # ─── 주가 백필 ────────────────────────────────────────────────────────────────
 
@@ -161,7 +171,8 @@ def fetch_financials_for_year(api_key, corp_map, year):
             for item in items:
                 fs_div = item.get("fs_div", "OFS")
                 acct_nm = item.get("account_nm", "")
-                matched = next((v for k, v in ACCOUNT_MAP.items() if k in acct_nm), None)
+                matched = ACCOUNT_MAP_EXACT.get(acct_nm.strip()) or next(
+                    (v for k, v in ACCOUNT_MAP.items() if k in acct_nm), None)
                 if not matched:
                     continue
                 ticker = corp_map.get(item.get("corp_code", ""), "")
