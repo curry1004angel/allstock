@@ -24,6 +24,11 @@ jobs:
           DART_API_KEY: ${{ secrets.DART_API_KEY }}
         run: python scripts/fetch_financials.py
 
+      - name: 현금흐름 수집 (전체 재무제표 API, 증분)
+        env:
+          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+        run: python scripts/fetch_cashflow.py
+
       - name: QoQ/YoY 계산
         run: python scripts/calculate_changes.py
 
