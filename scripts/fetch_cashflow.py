@@ -5,8 +5,15 @@
 # 증분 방식 ② 회당 호출 상한(MAX_CALLS)을 두고, 남은 것은 다음 주 실행이 이어받는다.
 # 반기·3분기 CF는 누적 공시라 저장된 이전 분기 단일값과 차분해 단일 분기값으로 변환한다.
 # 4Q는 calculate_changes의 generate_q4가 연간−(1~3Q합)으로 도출하므로 여기서는 만들지 않는다.
+#
+# 사용법:
+#   python scripts/fetch_cashflow.py                        최신 2개 연도(분기+연간) — 주간 실행
+#   python scripts/fetch_cashflow.py 2016 2020 --annual-only  과거 연간만 백필
+# 백필에 연간만 쓰는 이유: 이익의 질(OCF/순이익)·FCF마진 추세는 연간이면 충분한데
+# 분기까지 받으면 호출이 4배로 늘어 DART 일일 쿼터(2만)를 금방 넘긴다.
 import os
 import re
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -17,8 +24,11 @@ import requests
 from fetch_financials import DART_BASE, get_corp_code_map, parse_amount, update_parquet
 
 DART_API_KEY = os.environ["DART_API_KEY"]
-MAX_CALLS = 15000    # 일일 쿼터 내 안전 상한 (fetch_financials 몫 여유 포함)
-MAX_MINUTES = 150    # 워크플로 작업 한도(6h) 안에서 수집분이 반드시 저장되도록 하는 시간 상한
+MAX_CALLS = int(os.environ.get("CF_MAX_CALLS", 15000))      # 일일 쿼터 내 안전 상한
+# 워크플로 작업 한도(6h) 안에서 수집분이 반드시 저장되도록 하는 시간 상한.
+# 주간 실행은 앞단 fetch_financials(~60분)와 나눠 써야 해 기본 150분,
+# 과거 백필 전용 실행은 환경변수로 늘려 6h 예산을 더 쓴다.
+MAX_MINUTES = int(os.environ.get("CF_MAX_MINUTES", 150))
 
 # 표준계정ID 우선 매칭, 없으면 공백 제거한 계정명 정확일치 폴백
 CF_ACCOUNT_IDS = {
@@ -45,6 +55,16 @@ REPRT_BY_QUARTER = {"1Q": "11013", "2Q": "11012", "3Q": "11014", "annual": "1101
 class QuotaExceeded(Exception):
     # DART 일일 쿼터(status 020) — 지금까지 수집분은 저장하고 중단한다
     pass
+
+
+def parse_args(current_year):
+    # 사용법: (인자 없음) 최신 2개 연도 분기+연간 | [시작연도] [종료연도] [--annual-only]
+    argv = [x for x in sys.argv[1:] if not x.startswith("--")]
+    annual_only = "--annual-only" in sys.argv[1:]
+    if len(argv) >= 2:
+        start, end = int(argv[0]), int(argv[1])
+        return list(range(end, start - 1, -1)), annual_only  # 최신 연도 우선
+    return [current_year, current_year - 1], annual_only
 
 
 def fetch_cf(corp_code, year, reprt_code):
@@ -119,9 +139,16 @@ def main():
     rows_q, rows_a = [], []
     stopped = False
 
-    for year in (current_year, current_year - 1):  # 최신 연도 우선
+    # 인자 없으면 기존 동작(최신 2개 연도, 분기+연간). 연도 범위를 주면 과거 백필 모드로,
+    # 이때는 --annual-only로 연간만 받는 게 기본 용도다(이익의 질 추세엔 연간이면 충분하고
+    # 분기까지 받으면 호출이 4배로 늘어 일일 쿼터를 넘긴다).
+    years, annual_only = parse_args(current_year)
+
+    for year in years:
         # 차분 순서 보장을 위해 연도 안에서는 1Q→2Q→3Q→연간 순서로 돈다
         for quarter in ("1Q", "2Q", "3Q", "annual"):
+            if annual_only and quarter != "annual":
+                continue
             if quarter == "annual":
                 if year not in valid_a:
                     continue
