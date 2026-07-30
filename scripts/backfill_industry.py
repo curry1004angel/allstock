@@ -20,6 +20,11 @@ DATA = Path("data")
 LIST_PATH = DATA / "stock_list.csv"
 SUFFIX = {"KOSPI": ".KS", "KOSDAQ": ".KQ"}
 
+# 조회했지만 야후에 분류가 없는 종목에 적는 값. 빈 칸으로 두면 '아직 백필이 안 닿음'과
+# 구분되지 않고, 재실행 때마다 같은 종목을 다시 조회하게 된다.
+# 소비 측(analysis-cards)은 이 값을 업종으로 취급하지 않는다.
+NO_INDUSTRY = "(분류 없음)"
+
 
 def save(df: pd.DataFrame):
     # 임시 파일에 쓰고 교체한다. 중간에 죽어도 원본이 깨지지 않게.
@@ -63,6 +68,9 @@ def main():
             df.at[idx, "sector"] = sec
             df.at[idx, "industry"] = ind
             done += 1
+        else:
+            # 조회는 됐는데 분류가 없다. 센티널로 기록해 재실행 때 건너뛴다.
+            df.at[idx, "industry"] = NO_INDUSTRY
         if n % 50 == 0 or n == len(todo):
             print(f"[{n}/{len(todo)}] {tk} sector={sec} industry={ind} (누적 확보 {done})")
         if n % args.save_every == 0:
