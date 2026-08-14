@@ -47,9 +47,9 @@ def update_parquet(path: Path, new_df: pd.DataFrame, key_cols: list):
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
         existing = pd.read_parquet(path)
-        # 변화율 컬럼(yoy/qoq/cum_amount)은 calculate_changes가 다시 만든다. 원본 컬럼만 합친다.
-        keep = [c for c in existing.columns if c in new_df.columns]
-        combined = pd.concat([existing[keep], new_df], ignore_index=True)
+        # qoq/yoy는 calculate_changes가 다시 만들지만 cum_amount는 DART 수집만 채우므로
+        # 컬럼을 걸러내지 않고 그대로 합친다 — 걸러내면 eps 아닌 기존 행의 cum_amount까지 사라진다.
+        combined = pd.concat([existing, new_df], ignore_index=True)
     else:
         combined = new_df
     combined = combined.drop_duplicates(subset=key_cols, keep="last")

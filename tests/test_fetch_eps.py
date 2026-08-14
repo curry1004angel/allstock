@@ -52,3 +52,40 @@ def test_NaN은_건너뛴다():
 def test_빈_데이터프레임은_빈_리스트():
     assert fetch_eps.extract_eps(pd.DataFrame(), "005930", True) == []
     assert fetch_eps.extract_eps(None, "005930", True) == []
+
+
+def test_기존_컬럼이_보존된다(tmp_path):
+    path = tmp_path / "quarterly.parquet"
+    existing = pd.DataFrame([
+        {"ticker": "005930", "year": 2025, "quarter": "3Q", "account": "net_income",
+         "amount": 1000.0, "qoq": 5.0, "yoy": 10.0, "cum_amount": 500.0},
+    ])
+    existing.to_parquet(path, index=False, compression="snappy")
+
+    new_df = pd.DataFrame([
+        {"ticker": "005930", "year": 2025, "quarter": "1Q", "account": "eps", "amount": 1192.0},
+    ])
+    fetch_eps.update_parquet(path, new_df, ["ticker", "year", "quarter", "account"])
+
+    result = pd.read_parquet(path)
+    row = result[(result["ticker"] == "005930") & (result["account"] == "net_income")]
+    assert row.iloc[0]["cum_amount"] == 500.0
+
+
+def test_새_eps_행은_병합되고_키_중복은_새_값이_이긴다(tmp_path):
+    path = tmp_path / "quarterly.parquet"
+    existing = pd.DataFrame([
+        {"ticker": "005930", "year": 2025, "quarter": "1Q", "account": "eps", "amount": 999.0},
+    ])
+    existing.to_parquet(path, index=False, compression="snappy")
+
+    new_df = pd.DataFrame([
+        {"ticker": "005930", "year": 2025, "quarter": "1Q", "account": "eps", "amount": 1192.0},
+    ])
+    fetch_eps.update_parquet(path, new_df, ["ticker", "year", "quarter", "account"])
+
+    result = pd.read_parquet(path)
+    match = result[(result["ticker"] == "005930") & (result["year"] == 2025)
+                   & (result["quarter"] == "1Q") & (result["account"] == "eps")]
+    assert len(match) == 1
+    assert match.iloc[0]["amount"] == 1192.0
