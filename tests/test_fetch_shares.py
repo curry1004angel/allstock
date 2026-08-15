@@ -58,3 +58,13 @@ def test_자사주_소각이면_음수():
         columns=[pd.Timestamp("2026-03-31"), pd.Timestamp("2025-12-31")],
     )
     assert fs.shares_qoq_from_balance(bs) == pytest.approx(-10.0, abs=0.01)
+
+
+def test_직전분기가_NaN이면_None():
+    # 최근 분기는 값이 있지만 직전 분기가 NaN이면 비교할 수 없으므로 None을 반환한다.
+    bs = pd.DataFrame(
+        [[5792563304.0, pd.NA]],
+        index=["Ordinary Shares Number"],
+        columns=[pd.Timestamp("2026-03-31"), pd.Timestamp("2025-12-31")],
+    )
+    assert fs.shares_qoq_from_balance(bs) is None

@@ -36,8 +36,8 @@ def shares_qoq_from_balance(bs):
     row = next((r for r in SHARE_ROWS if r in bs.index), None)
     if row is None:
         return None
-    vals = [v for v in bs.loc[row].tolist() if pd.notna(v)]
-    if len(vals) < 2 or vals[1] == 0:
+    vals = bs.loc[row].tolist()[:2]
+    if len(vals) < 2 or any(pd.isna(v) for v in vals) or vals[1] == 0:
         return None
     return round((vals[0] - vals[1]) / abs(vals[1]) * 100, 2)
 
