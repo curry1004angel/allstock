@@ -2,6 +2,8 @@
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import backfill_eps_dart as bed
 
@@ -86,3 +88,30 @@ def test_CFS가_성공하면_OFS를_호출하지_않는다(monkeypatch):
     items = bed.fetch_one("00126380", 2020, "11011")
     assert bed.pick_eps(items) == 700.0
     assert calls == ["CFS"]
+
+
+def test_CFS에_다른_계정만_있고_주당이익이_없으면_OFS로_재시도한다(monkeypatch):
+    # 리스트가 비지 않아도(매출액 등 다른 계정만 있고) 주당이익 항목 자체가
+    # 없으면 폴백해야 한다. 술어를 "if items:"로 되돌리면 실패한다.
+    calls = []
+
+    def fake_get(url, params=None, timeout=None):
+        calls.append(params["fs_div"])
+        if params["fs_div"] == "CFS":
+            return FakeResponse({"status": "000", "list": [item("매출액", "1000")]})
+        return FakeResponse({"status": "000", "list": [item("기본주당이익", "300", fs_div="OFS")]})
+
+    monkeypatch.setattr(bed.requests, "get", fake_get)
+    items = bed.fetch_one("00126380", 2020, "11011")
+    assert bed.pick_eps(items) == 300.0
+    assert calls == ["CFS", "OFS"]
+
+
+def test_DART_API_KEY가_없으면_main이_argv_파싱_전에_막힌다(monkeypatch):
+    # 키 가드가 main() 최상단에 있는지 회귀 테스트로 고정한다. 인자를 아예 주지
+    # 않아도(argv 부족) 키 부재 메시지로 먼저 막혀야 한다.
+    monkeypatch.setattr(bed, "DART_API_KEY", "")
+    monkeypatch.setattr(sys, "argv", ["backfill_eps_dart.py"])
+    with pytest.raises(SystemExit) as exc_info:
+        bed.main()
+    assert "DART_API_KEY" in str(exc_info.value)

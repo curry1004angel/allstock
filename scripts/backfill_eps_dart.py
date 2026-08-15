@@ -3,6 +3,8 @@
 # 기존 fetch_financials.py가 쓰는 fnlttMultiAcnt(100종목 배치)에는 주당이익이 없다.
 # 전체계정 API fnlttSinglAcntAll은 종목당 1콜이라 2016~2026 전체가 약 12만 콜이고
 # 일일 한도가 2만 콜이다. 연도 범위를 인자로 받아 나눠 실행한다.
+# (CFS에서 주당이익을 못 찾은 비연결 회사는 OFS로 한 번 더 호출하므로 실제 호출 수는
+#  이보다 다소 늘어난다.)
 #
 # DART_API_KEY는 GitHub Secrets에만 있고 로컬·CI 모두 없는 상태로 테스트를 돌리므로,
 # 모듈 최상단에서는 os.environ.get으로 비어있어도 죽지 않게 읽는다. fetch_financials는
@@ -80,11 +82,14 @@ def fetch_one(corp_code, year, reprt_code):
         return data.get("list", [])
 
     # 연결재무제표(CFS)를 먼저 요청한다. 연결재무제표를 작성하지 않는 회사
-    # (코스닥 소형주 다수)는 CFS 응답이 비어 EPS가 통째로 누락되므로, 비었을 때만
-    # 별도재무제표(OFS)로 한 번 더 요청한다. 비연결 회사만 두 번 호출하므로
-    # 전체 호출 증가는 제한적이다.
+    # (코스닥 소형주 다수)는 CFS 응답 자체가 비어 EPS가 통째로 누락된다. 응답이
+    # 비지 않아도(다른 계정만 있고 그 기간의 주당이익 항목이 없는 경우) 마찬가지로
+    # 누락되므로, "리스트가 비었는가"가 아니라 "주당이익을 뽑을 수 있는가"로 판정해
+    # CFS에서 주당이익을 못 찾았을 때만 별도재무제표(OFS)로 한 번 더 요청한다.
+    # 비연결 회사만(또는 CFS에 EPS가 없는 회사만) 두 번 호출하므로 전체 호출
+    # 증가는 제한적이다.
     items = request("CFS")
-    if items:
+    if pick_eps(items) is not None:
         return items
     return request("OFS")
 
