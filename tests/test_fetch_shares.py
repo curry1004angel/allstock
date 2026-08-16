@@ -68,3 +68,28 @@ def test_직전분기가_NaN이면_None():
         columns=[pd.Timestamp("2026-03-31"), pd.Timestamp("2025-12-31")],
     )
     assert fs.shares_qoq_from_balance(bs) is None
+
+
+def test_다른_asof_행은_둘_다_남는다(tmp_path):
+    path = tmp_path / "shares_history.parquet"
+    old = pd.DataFrame({"ticker": ["005930"], "asof": ["20260101"],
+                         "shares": [100.0], "market_cap": [1000.0]})
+    old.to_parquet(path, index=False, compression="snappy")
+    new = pd.DataFrame({"ticker": ["005930"], "asof": ["20260814"],
+                         "shares": [95.0], "market_cap": [990.0]})
+    fs.update_history(new, path)
+    result = pd.read_parquet(path)
+    assert sorted(result["asof"]) == ["20260101", "20260814"]
+
+
+def test_같은_키는_새_값으로_갈아끼워진다(tmp_path):
+    path = tmp_path / "shares_history.parquet"
+    old = pd.DataFrame({"ticker": ["005930"], "asof": ["20260814"],
+                         "shares": [100.0], "market_cap": [1000.0]})
+    old.to_parquet(path, index=False, compression="snappy")
+    new = pd.DataFrame({"ticker": ["005930"], "asof": ["20260814"],
+                         "shares": [95.0], "market_cap": [990.0]})
+    fs.update_history(new, path)
+    result = pd.read_parquet(path)
+    assert len(result) == 1
+    assert result.iloc[0]["shares"] == 95.0
