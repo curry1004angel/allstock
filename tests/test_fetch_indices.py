@@ -37,6 +37,22 @@ def test_거래량이_없는_지수는_0으로_채운다():
     assert list(out["volume"]) == [0, 0]
 
 
+def test_거래량이_NaN이면_0으로_채운다():
+    # 데이터 소스가 폴백되면 Volume 컬럼은 있는데 값이 전부 NaN으로 온다.
+    df = fdr_like()
+    df["Volume"] = [float("nan"), float("nan")]
+    out = fi.normalize(df)
+    assert list(out["volume"]) == [0, 0]
+    assert out["volume"].dtype == "int64"
+
+
+def test_거래량_일부만_NaN이면_그_행만_0이_된다():
+    df = fdr_like()
+    df["Volume"] = [float("nan"), 410000.0]
+    out = fi.normalize(df)
+    assert list(out["volume"]) == [0, 410000]
+
+
 def test_날짜순으로_정렬된다():
     df = fdr_like().iloc[::-1]
     out = fi.normalize(df)

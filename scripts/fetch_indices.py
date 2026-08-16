@@ -29,9 +29,14 @@ def normalize(df) -> pd.DataFrame:
     out["date"] = pd.to_datetime(out[date_col]).dt.strftime("%Y%m%d")
     for src, dst in (("Open", "open"), ("High", "high"), ("Low", "low"), ("Close", "close")):
         out[dst] = out[src].astype(float)
-    # 일부 지수는 거래량을 주지 않는다. 분산일 판정이 불가능하다는 뜻이므로 0으로 두고
+    # 일부 지수는 거래량을 주지 않는다. 컬럼 자체가 없는 경우도 있고, 데이터 소스가
+    # 폴백되면 컬럼은 있는데 값이 전부 NaN으로 오기도 한다(astype("int64")가 여기서 죽는다).
+    # 분산일 판정이 불가능하다는 뜻이므로 둘 다 0으로 두고,
     # 소비 측(canslim.py)이 0을 보고 데이터부족으로 처리하게 한다.
-    out["volume"] = out["Volume"].astype("int64") if "Volume" in out.columns else 0
+    if "Volume" in out.columns:
+        out["volume"] = pd.to_numeric(out["Volume"], errors="coerce").fillna(0).astype("int64")
+    else:
+        out["volume"] = 0
     return out[COLUMNS].sort_values("date").reset_index(drop=True)
 
 
