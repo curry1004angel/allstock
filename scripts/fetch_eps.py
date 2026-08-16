@@ -62,7 +62,7 @@ def main():
     sl = pd.read_csv(DATA / "stock_list.csv", dtype=str, encoding="utf-8-sig")
     print(f"야후 EPS 수집: {len(sl)}종목")
 
-    q_rows, a_rows, ok = [], [], 0
+    q_rows, a_rows, ok, fail = [], [], 0, 0
     for i, (_, r) in enumerate(sl.iterrows(), 1):
         sym = to_symbol(r["ticker"], r["market"])
         try:
@@ -73,13 +73,15 @@ def main():
                 ok += 1
             q_rows += qr
             a_rows += ar
-        except Exception:
-            pass
+        except Exception as e:
+            fail += 1
+            if fail <= 5:
+                print(f"  요청 오류: {r['ticker']} {e}")
         time.sleep(0.1)
         if i % 200 == 0:
             print(f"  {i}/{len(sl)} 처리 (수집 {ok}종목)")
 
-    print(f"EPS 수집 완료: {ok}종목")
+    print(f"EPS 수집 완료: {ok}종목, 실패 {fail}종목")
     if q_rows:
         update_parquet(DATA / "financials/quarterly.parquet", pd.DataFrame(q_rows),
                        ["ticker", "year", "quarter", "account"])
