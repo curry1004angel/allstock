@@ -29,7 +29,9 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/flows/
+          # KRX 자격증명이 없으면 스크립트가 파일을 만들지 않고 정상 종료한다.
+          # 그때 data/flows/를 add하면 pathspec 오류로 실행이 실패로 표시되므로 존재할 때만 add한다.
+          if [ -d data/flows ]; then git add data/flows/; fi
           git diff --staged --quiet || git commit -m "기관 수급 업데이트: $(date -u +%Y%m%d)"
           git pull --rebase
           git push
