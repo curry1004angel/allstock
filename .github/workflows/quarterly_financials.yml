@@ -29,6 +29,12 @@ jobs:
           DART_API_KEY: ${{ secrets.DART_API_KEY }}
         run: python scripts/fetch_cashflow.py
 
+      - name: 주당순이익 수집
+        run: python scripts/fetch_eps.py
+
+      - name: 주식수 스냅샷 수집
+        run: python scripts/fetch_shares.py
+
       - name: QoQ/YoY 계산
         run: python scripts/calculate_changes.py
 
@@ -36,7 +42,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/financials/
+          git add data/financials/ data/screener/
           git diff --staged --quiet || git commit -m "재무 업데이트: $(date -u +%Y%m%d)"
           git pull --rebase
           git push

@@ -1,0 +1,44 @@
+name: DART 주당이익 백필
+
+on:
+  workflow_dispatch:
+    inputs:
+      year_from:
+        description: '시작 연도'
+        required: true
+        default: '2024'
+      year_to:
+        description: '종료 연도'
+        required: true
+        default: '2026'
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: 주당이익 백필
+        env:
+          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+        run: python scripts/backfill_eps_dart.py ${{ github.event.inputs.year_from }} ${{ github.event.inputs.year_to }}
+
+      - name: 변화율 재계산
+        run: python scripts/calculate_changes.py
+
+      - name: 변경사항 커밋 및 푸시
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/financials/
+          git diff --staged --quiet || git commit -m "주당이익 백필: ${{ github.event.inputs.year_from }}~${{ github.event.inputs.year_to }}"
+          git pull --rebase
+          git push

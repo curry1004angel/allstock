@@ -1,5 +1,6 @@
 finance-datareader>=0.9.0
 pandas>=2.0.0
 pyarrow>=14.0.0
+pykrx>=1.2.8
 requests>=2.31.0
 yfinance>=0.2.40
