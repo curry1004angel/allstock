@@ -1,0 +1,42 @@
+name: 임시 진단 - KRX 접근
+
+# CI에서 data.krx.co.kr 로그인 엔드포인트가 무엇을 반환하는지 1회 확인하기 위한
+# 일회용 워크플로다. 확인 후 삭제한다. 실제 계정 정보는 쓰지 않는다.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - run: pip install requests
+
+      - name: KRX 로그인 엔드포인트 응답 확인
+        run: |
+          python - <<'PY'
+          import requests
+
+          LOGIN_PAGE = "https://data.krx.co.kr/contents/MDC/COMS/client/MDCCOMS001.cmd"
+          LOGIN_URL = "https://data.krx.co.kr/contents/MDC/COMS/client/MDCCOMS001D1.cmd"
+          UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+
+          print("나가는 IP:", requests.get("https://api.ipify.org", timeout=15).text)
+
+          s = requests.Session()
+          r = s.get(LOGIN_PAGE, headers={"User-Agent": UA}, timeout=15)
+          print(f"GET  login page: {r.status_code} {r.headers.get('Content-Type')} len={len(r.content)}")
+          print("  본문 앞 200자:", repr(r.text[:200]))
+
+          payload = {"mbrNm": "", "telNo": "", "di": "", "certType": "",
+                     "mbrId": "no_such_account_probe_zzz", "pw": "x"}
+          r = s.post(LOGIN_URL, data=payload,
+                     headers={"User-Agent": UA, "Referer": LOGIN_PAGE}, timeout=15)
+          print(f"POST login: {r.status_code} {r.headers.get('Content-Type')} len={len(r.content)}")
+          print("  본문 앞 400자:", repr(r.text[:400]))
+          PY
