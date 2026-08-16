@@ -1,7 +1,7 @@
 name: 임시 진단 - KRX 접근
 
-# CI에서 data.krx.co.kr 로그인 엔드포인트가 무엇을 반환하는지 1회 확인하기 위한
-# 일회용 워크플로다. 확인 후 삭제한다. 실제 계정 정보는 쓰지 않는다.
+# CI에서 data.krx.co.kr 로그인이 무엇을 반환하는지 확인하기 위한 일회용 워크플로다.
+# 확인 후 삭제한다. 자격증명 값은 출력하지 않는다(상태·에러코드·길이만 찍는다).
 
 on:
   workflow_dispatch:
@@ -16,27 +16,41 @@ jobs:
 
       - run: pip install requests
 
-      - name: KRX 로그인 엔드포인트 응답 확인
+      - name: KRX 로그인 응답 확인
+        env:
+          KRX_ID: ${{ secrets.KRX_ID }}
+          KRX_PW: ${{ secrets.KRX_PW }}
         run: |
           python - <<'PY'
+          import os
           import requests
 
           LOGIN_PAGE = "https://data.krx.co.kr/contents/MDC/COMS/client/MDCCOMS001.cmd"
+          LOGIN_JSP = "https://data.krx.co.kr/contents/MDC/COMS/client/view/login.jsp?site=mdc"
           LOGIN_URL = "https://data.krx.co.kr/contents/MDC/COMS/client/MDCCOMS001D1.cmd"
           UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                 "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
-          print("나가는 IP:", requests.get("https://api.ipify.org", timeout=15).text)
+          uid = os.environ.get("KRX_ID", "")
+          pw = os.environ.get("KRX_PW", "")
+          # 값 자체는 찍지 않는다. 길이와 공백 혼입 여부만 본다.
+          print(f"KRX_ID 길이={len(uid)} 앞뒤공백={uid != uid.strip()} 비ASCII={not uid.isascii()}")
+          print(f"KRX_PW 길이={len(pw)} 앞뒤공백={pw != pw.strip()} 비ASCII={not pw.isascii()}")
 
           s = requests.Session()
-          r = s.get(LOGIN_PAGE, headers={"User-Agent": UA}, timeout=15)
-          print(f"GET  login page: {r.status_code} {r.headers.get('Content-Type')} len={len(r.content)}")
-          print("  본문 앞 200자:", repr(r.text[:200]))
+          s.get(LOGIN_PAGE, headers={"User-Agent": UA}, timeout=15)
+          s.get(LOGIN_JSP, headers={"User-Agent": UA, "Referer": LOGIN_PAGE}, timeout=15)
 
           payload = {"mbrNm": "", "telNo": "", "di": "", "certType": "",
-                     "mbrId": "no_such_account_probe_zzz", "pw": "x"}
+                     "mbrId": uid, "pw": pw}
           r = s.post(LOGIN_URL, data=payload,
                      headers={"User-Agent": UA, "Referer": LOGIN_PAGE}, timeout=15)
           print(f"POST login: {r.status_code} {r.headers.get('Content-Type')} len={len(r.content)}")
-          print("  본문 앞 400자:", repr(r.text[:400]))
+          try:
+              d = r.json()
+              print("  _error_code   :", d.get("_error_code"))
+              print("  _error_message:", d.get("_error_message"))
+          except Exception as e:
+              print("  JSON 파싱 실패:", e)
+              print("  본문 앞 400자:", repr(r.text[:400]))
           PY
