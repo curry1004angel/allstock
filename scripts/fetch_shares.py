@@ -1,4 +1,4 @@
-# 한국 상장사의 시가총액·상장주식수 스냅샷과 주식수 분기 변화율을 수집하는 스크립트
+# 한국 상장사의 시가총액·상장주식수 스냅샷과 주식수 전년 대비 변화율을 수집하는 스크립트
 #
 # EPS 계산에는 쓰지 않는다(fetch_eps.py가 공시 EPS를 직접 받는다).
 # S 항목의 규모 표시와 자사주 매입 판정(주식수 감소)에만 쓰므로 현재값이면 충분하다.
@@ -12,7 +12,7 @@ import yfinance as yf
 
 OUT = Path("data/screener/shares_snapshot.parquet")
 HISTORY = Path("data/screener/shares_history.parquet")
-COLUMNS = ["ticker", "asof", "shares", "float_shares", "market_cap", "shares_qoq"]
+COLUMNS = ["ticker", "asof", "shares", "float_shares", "market_cap", "shares_yoy"]
 SUFFIX = {"KOSPI": ".KS", "KOSDAQ": ".KQ"}
 SHARE_ROWS = ["Ordinary Shares Number", "Share Issued"]
 
@@ -25,22 +25,37 @@ def from_krx_listing(df: pd.DataFrame, asof: str) -> pd.DataFrame:
         # KRX 목록에 유통주식수가 없다. 0으로 채우면 소비 측이 실제 값으로 읽는다.
         "float_shares": pd.NA,
         "market_cap": df["Marcap"].astype(float),
-        "shares_qoq": pd.NA,
+        "shares_yoy": pd.NA,
     })
     return out[COLUMNS].reset_index(drop=True)
 
 
-def shares_qoq_from_balance(bs):
-    # 야후 분기 재무상태표에서 최근 두 분기의 주식수를 비교한다. 열은 최신이 왼쪽이다.
+def shares_yoy_from_balance(bs):
+    # 야후 분기 재무상태표에서 최근 분기와 1년 전 같은 분기의 주식수를 비교한다.
+    # 열은 최신이 왼쪽이다.
+    #
+    # 직전 분기와 비교하지 않는 이유. 한국 종목은 연말(12-31) 열에만 우선주가 합산돼
+    # 들어온다(삼성전자 2025-12-31이 66.3억 주, 앞뒤 분기는 58억 주대). 인접 분기를
+    # 비교하면 있지도 않은 12% 감자가 잡힌다. 같은 분기끼리 보면 보고 기준이 같아
+    # 이 오염을 타지 않고, 자사주 소각 추세도 1년 창이 분기보다 적절하다.
     if bs is None or len(bs) == 0:
         return None
     row = next((r for r in SHARE_ROWS if r in bs.index), None)
     if row is None:
         return None
-    vals = bs.loc[row].tolist()[:2]
-    if len(vals) < 2 or any(pd.isna(v) for v in vals) or vals[1] == 0:
+    cols = list(bs.columns)
+    if not cols:
         return None
-    return round((vals[0] - vals[1]) / abs(vals[1]) * 100, 2)
+    # 결산월이 분기마다 며칠씩 밀리는 종목이 있어 정확일치 대신 45일 허용오차를 둔다.
+    # 인접 분기는 90일 이상 떨어져 있어 오매칭되지 않는다.
+    target = cols[0] - pd.DateOffset(years=1)
+    prior = next((c for c in cols[1:] if abs((c - target).days) <= 45), None)
+    if prior is None:
+        return None
+    cur, prev = bs.loc[row, cols[0]], bs.loc[row, prior]
+    if pd.isna(cur) or pd.isna(prev) or prev == 0:
+        return None
+    return round((cur - prev) / abs(prev) * 100, 2)
 
 
 def update_history(snap: pd.DataFrame, path: Path = HISTORY) -> int:
@@ -67,20 +82,20 @@ def main():
     market_of = dict(zip(sl["ticker"], sl["market"]))
     snap = snap[snap["ticker"].isin(market_of)].reset_index(drop=True)
 
-    print(f"주식수 스냅샷: {len(snap)}종목, 분기 변화율 수집 시작")
-    qoq = {}
+    print(f"주식수 스냅샷: {len(snap)}종목, 전년 대비 변화율 수집 시작")
+    yoy = {}
     for i, tk in enumerate(snap["ticker"], 1):
         sym = f"{tk}{SUFFIX.get(str(market_of.get(tk, '')).strip(), '.KS')}"
         try:
-            qoq[tk] = shares_qoq_from_balance(yf.Ticker(sym).quarterly_balance_sheet)
+            yoy[tk] = shares_yoy_from_balance(yf.Ticker(sym).quarterly_balance_sheet)
         except Exception:  # noqa: BLE001
-            qoq[tk] = None
+            yoy[tk] = None
         time.sleep(0.1)
         if i % 200 == 0:
-            got = sum(1 for v in qoq.values() if v is not None)
+            got = sum(1 for v in yoy.values() if v is not None)
             print(f"  {i}/{len(snap)} 처리 (변화율 확보 {got}종목)")
 
-    snap["shares_qoq"] = snap["ticker"].map(qoq)
+    snap["shares_yoy"] = snap["ticker"].map(yoy)
     OUT.parent.mkdir(parents=True, exist_ok=True)
     snap.to_parquet(OUT, index=False, compression="snappy")
     print(f"저장 완료: {len(snap)}행 → {OUT}")

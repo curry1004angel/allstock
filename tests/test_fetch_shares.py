@@ -20,7 +20,7 @@ def krx_like():
 
 def test_컬럼이_스키마대로_나온다():
     out = fs.from_krx_listing(krx_like(), "20260814")
-    assert list(out.columns) == ["ticker", "asof", "shares", "float_shares", "market_cap", "shares_qoq"]
+    assert list(out.columns) == ["ticker", "asof", "shares", "float_shares", "market_cap", "shares_yoy"]
 
 
 def test_티커와_수치가_옮겨진다():
@@ -37,37 +37,60 @@ def test_유통주식수는_한국에서_비어있다():
     assert out["float_shares"].isna().all()
 
 
-def test_shares_qoq는_잔액표가_없으면_None():
-    assert fs.shares_qoq_from_balance(None) is None
-    assert fs.shares_qoq_from_balance(pd.DataFrame()) is None
-
-
-def test_shares_qoq는_직전분기_대비_퍼센트():
-    bs = pd.DataFrame(
-        [[5792563304.0, 5876745450.0]],
+def 삼성_잔액표(values):
+    # 야후가 실제로 주는 열 구성. 2025-12-31 열에만 우선주가 합산돼 들어온다.
+    return pd.DataFrame(
+        [values],
         index=["Ordinary Shares Number"],
-        columns=[pd.Timestamp("2026-03-31"), pd.Timestamp("2025-12-31")],
+        columns=[pd.Timestamp("2026-03-31"), pd.Timestamp("2025-12-31"),
+                 pd.Timestamp("2025-09-30"), pd.Timestamp("2025-06-30"),
+                 pd.Timestamp("2025-03-31")],
     )
-    assert fs.shares_qoq_from_balance(bs) == pytest.approx(-1.43, abs=0.01)
+
+
+def test_shares_yoy는_잔액표가_없으면_None():
+    assert fs.shares_yoy_from_balance(None) is None
+    assert fs.shares_yoy_from_balance(pd.DataFrame()) is None
+
+
+def test_연말_열의_우선주_합산에_속지_않는다():
+    # 인접 분기(2026-03 대 2025-12)를 보면 -12.63%라는 없는 감자가 잡힌다.
+    # 1년 전 같은 분기와 비교하면 실제값 -1.70%가 나온다.
+    bs = 삼성_잔액표([5792563304.0, 6630180138.0, 5828224765.0, 5876745450.0, 5892637922.0])
+    assert fs.shares_yoy_from_balance(bs) == pytest.approx(-1.70, abs=0.01)
 
 
 def test_자사주_소각이면_음수():
-    bs = pd.DataFrame(
-        [[90.0, 100.0]],
-        index=["Ordinary Shares Number"],
-        columns=[pd.Timestamp("2026-03-31"), pd.Timestamp("2025-12-31")],
-    )
-    assert fs.shares_qoq_from_balance(bs) == pytest.approx(-10.0, abs=0.01)
+    bs = 삼성_잔액표([90.0, 999.0, 97.0, 98.0, 100.0])
+    assert fs.shares_yoy_from_balance(bs) == pytest.approx(-10.0, abs=0.01)
 
 
-def test_직전분기가_NaN이면_None():
-    # 최근 분기는 값이 있지만 직전 분기가 NaN이면 비교할 수 없으므로 None을 반환한다.
+def test_1년_전_분기가_NaN이면_None():
+    bs = 삼성_잔액표([5792563304.0, 6630180138.0, 5828224765.0, 5876745450.0, pd.NA])
+    assert fs.shares_yoy_from_balance(bs) is None
+
+
+def test_1년_전_분기_열이_없으면_None():
+    # 상장 1년 미만 등으로 열이 네 개뿐이면 비교 대상이 없다.
     bs = pd.DataFrame(
-        [[5792563304.0, pd.NA]],
+        [[90.0, 999.0, 97.0, 98.0]],
         index=["Ordinary Shares Number"],
-        columns=[pd.Timestamp("2026-03-31"), pd.Timestamp("2025-12-31")],
+        columns=[pd.Timestamp("2026-03-31"), pd.Timestamp("2025-12-31"),
+                 pd.Timestamp("2025-09-30"), pd.Timestamp("2025-06-30")],
     )
-    assert fs.shares_qoq_from_balance(bs) is None
+    assert fs.shares_yoy_from_balance(bs) is None
+
+
+def test_결산일이_며칠_밀려도_매칭된다():
+    # 45일 허용오차 안이면 같은 분기로 본다.
+    bs = pd.DataFrame(
+        [[95.0, 999.0, 97.0, 98.0, 100.0]],
+        index=["Ordinary Shares Number"],
+        columns=[pd.Timestamp("2026-04-04"), pd.Timestamp("2026-01-03"),
+                 pd.Timestamp("2025-10-04"), pd.Timestamp("2025-07-05"),
+                 pd.Timestamp("2025-03-29")],
+    )
+    assert fs.shares_yoy_from_balance(bs) == pytest.approx(-5.0, abs=0.01)
 
 
 def test_다른_asof_행은_둘_다_남는다(tmp_path):
