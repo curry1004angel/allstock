@@ -81,6 +81,24 @@ def test_1년_전_분기_열이_없으면_None():
     assert fs.shares_yoy_from_balance(bs) is None
 
 
+def test_최신열이_천주단위면_버린다():
+    # CME 실측. 최신 열만 천 주 단위로 와서 그대로 계산하면 -99.9% 감자가 잡힌다.
+    bs = 삼성_잔액표([359275.0, 358953138.0, 359852138.0, 359650138.0, 359650138.0])
+    assert fs.shares_yoy_from_balance(bs, 359576125.0) is None
+
+
+def test_실제_감소는_현재주식수도_같이_줄어_통과한다():
+    # 액면병합·인적분할이면 KRX 현재 주식수도 줄어 있어 관문을 통과한다.
+    bs = 삼성_잔액표([46239518.0, 46290951.0, 46290950.0, 71174000.0, 71174000.0])
+    assert fs.shares_yoy_from_balance(bs, 46290951.0) == pytest.approx(-35.04, abs=0.01)
+
+
+def test_현재주식수가_없으면_검증을_건너뛴다():
+    bs = 삼성_잔액표([90.0, 999.0, 97.0, 98.0, 100.0])
+    assert fs.shares_yoy_from_balance(bs, None) == pytest.approx(-10.0, abs=0.01)
+    assert fs.shares_yoy_from_balance(bs, float("nan")) == pytest.approx(-10.0, abs=0.01)
+
+
 def test_결산일이_며칠_밀려도_매칭된다():
     # 45일 허용오차 안이면 같은 분기로 본다.
     bs = pd.DataFrame(
