@@ -6,9 +6,11 @@ on:
       year_from:
         description: '시작 연도'
         required: true
-        default: '2024'
+        default: '2026'
       year_to:
-        description: '종료 연도'
+        # 종목 2700여개 × 4개 기간 = 연도당 약 11000콜이고 DART 일일 한도가 20000콜이다.
+        # 한 번에 1개 연도만 돌리고, 다음 연도는 하루 뒤에 실행한다.
+        description: '종료 연도 (일일 한도 때문에 시작 연도와 같게 두는 것을 권장)'
         required: true
         default: '2026'
 

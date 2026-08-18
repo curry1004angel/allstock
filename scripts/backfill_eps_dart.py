@@ -67,6 +67,10 @@ def pick_eps(items):
     return best[1] if best else None
 
 
+class QuotaExceeded(Exception):
+    """DART 일일 호출 한도 초과. 더 호출해도 전부 빈 응답이므로 즉시 멈춘다."""
+
+
 def fetch_one(corp_code, year, reprt_code):
     url = f"{DART_BASE}/fnlttSinglAcntAll.json"
 
@@ -77,7 +81,12 @@ def fetch_one(corp_code, year, reprt_code):
             data = requests.get(url, params=params, timeout=30).json()
         except Exception:  # noqa: BLE001
             return []
-        if data.get("status") != "000":
+        status = data.get("status")
+        # 020 = 사용한도 초과. 데이터 없음(013)과 달리 이후 호출도 전부 실패하므로
+        # 빈 응답으로 뭉뚱그리면 남은 기간이 조용히 0종목으로 채워진다.
+        if status == "020":
+            raise QuotaExceeded(data.get("message", "사용한도 초과"))
+        if status != "000":
             return []
         return data.get("list", [])
 
@@ -104,32 +113,46 @@ def main():
     from fetch_financials import get_corp_code_map, update_parquet  # 키 확인 뒤 지연 import
 
     corp_map = get_corp_code_map(DART_API_KEY)
-    print(f"corp_code {len(corp_map)}건 로드, {y_from}~{y_to} 백필 시작")
+    print(f"corp_code {len(corp_map)}건 로드, {y_from}~{y_to} 백필 시작", flush=True)
+    per_year = len(corp_map) * len(REPRT_CODES)
+    print(f"  예상 호출 약 {per_year * (y_to - y_from + 1)}건 "
+          f"(연도당 {per_year}건, 일일 한도 20000건)", flush=True)
 
-    q_rows, a_rows, calls = [], [], 0
+    def save(q_rows, a_rows):
+        if q_rows:
+            update_parquet(DATA / "financials/quarterly.parquet", pd.DataFrame(q_rows),
+                           ["ticker", "year", "quarter", "account"])
+        if a_rows:
+            update_parquet(DATA / "financials/annual.parquet", pd.DataFrame(a_rows),
+                           ["ticker", "year", "account"])
+
+    calls = 0
     for year in range(y_from, y_to + 1):
         for quarter, reprt in REPRT_CODES.items():
-            got = 0
-            for corp_code, ticker in corp_map.items():
-                eps = pick_eps(fetch_one(corp_code, year, reprt))
-                calls += 1
-                if eps is not None:
-                    got += 1
-                    row = {"ticker": ticker, "year": year, "account": "eps", "amount": eps}
-                    if quarter == "annual":
-                        a_rows.append({**row, "quarter": "annual"})
-                    else:
-                        q_rows.append({**row, "quarter": quarter})
-                time.sleep(0.05)
-            print(f"  {year} {quarter}: {got}종목 (누적 호출 {calls})")
+            # 기간 단위로 즉시 저장한다. 한 번에 모아 마지막에 쓰면 한도 초과나
+            # 잡 제한시간(350분)에 걸렸을 때 그때까지 받은 것이 전부 날아간다.
+            q_rows, a_rows, got = [], [], 0
+            try:
+                for corp_code, ticker in corp_map.items():
+                    eps = pick_eps(fetch_one(corp_code, year, reprt))
+                    calls += 1
+                    if eps is not None:
+                        got += 1
+                        row = {"ticker": ticker, "year": year, "account": "eps", "amount": eps}
+                        if quarter == "annual":
+                            a_rows.append({**row, "quarter": "annual"})
+                        else:
+                            q_rows.append({**row, "quarter": quarter})
+                    time.sleep(0.05)
+            except QuotaExceeded as e:
+                print(f"  {year} {quarter}: 한도 초과로 중단 ({got}종목까지 수집) — {e}", flush=True)
+                save(q_rows, a_rows)
+                print(f"중단: 호출 {calls}건. 내일 `{year} {y_to}` 범위로 다시 실행하세요.", flush=True)
+                return
+            print(f"  {year} {quarter}: {got}종목 (누적 호출 {calls})", flush=True)
+            save(q_rows, a_rows)
 
-    print(f"백필 완료: 호출 {calls}건, 분기 {len(q_rows)}행, 연간 {len(a_rows)}행")
-    if q_rows:
-        update_parquet(DATA / "financials/quarterly.parquet", pd.DataFrame(q_rows),
-                       ["ticker", "year", "quarter", "account"])
-    if a_rows:
-        update_parquet(DATA / "financials/annual.parquet", pd.DataFrame(a_rows),
-                       ["ticker", "year", "account"])
+    print(f"백필 완료: 호출 {calls}건", flush=True)
 
 
 if __name__ == "__main__":

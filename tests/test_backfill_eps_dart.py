@@ -77,6 +77,30 @@ def test_CFS가_비면_OFS로_재시도한다(monkeypatch):
     assert calls == ["CFS", "OFS"]
 
 
+def test_한도초과는_빈응답과_구분해_예외를_던진다(monkeypatch):
+    # status 020(사용한도 초과)을 013(데이터 없음)처럼 []로 뭉뚱그리면
+    # 남은 기간이 조용히 0종목으로 채워진 채 성공으로 끝난다.
+    def fake_get(url, params=None, timeout=None):
+        return FakeResponse({"status": "020", "message": "사용한도를 초과하였습니다."})
+
+    monkeypatch.setattr(bed.requests, "get", fake_get)
+    with pytest.raises(bed.QuotaExceeded):
+        bed.fetch_one("00126380", 2020, "11011")
+
+
+def test_한도초과는_OFS로_재시도하지_않는다(monkeypatch):
+    calls = []
+
+    def fake_get(url, params=None, timeout=None):
+        calls.append(params["fs_div"])
+        return FakeResponse({"status": "020", "message": "사용한도를 초과하였습니다."})
+
+    monkeypatch.setattr(bed.requests, "get", fake_get)
+    with pytest.raises(bed.QuotaExceeded):
+        bed.fetch_one("00126380", 2020, "11011")
+    assert calls == ["CFS"]
+
+
 def test_CFS가_성공하면_OFS를_호출하지_않는다(monkeypatch):
     calls = []
 
