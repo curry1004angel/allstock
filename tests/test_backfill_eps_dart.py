@@ -139,3 +139,28 @@ def test_DART_API_KEY가_없으면_main이_argv_파싱_전에_막힌다(monkeypa
     with pytest.raises(SystemExit) as exc_info:
         bed.main()
     assert "DART_API_KEY" in str(exc_info.value)
+
+
+def test_기간_수집은_전_종목을_돌려준다(monkeypatch):
+    # 병렬 수집으로 바꾼 뒤에도 종목이 누락되지 않아야 한다. 완료 순서가 뒤섞이므로
+    # 순서가 아니라 집합으로 비교한다.
+    def fake_get(url, params=None, timeout=None):
+        amount = {"A1": "100", "A2": "200", "A3": "300"}[params["corp_code"]]
+        return FakeResponse({"status": "000", "list": [item("기본주당이익", amount)]})
+
+    monkeypatch.setattr(bed.requests, "get", fake_get)
+    corp_map = {"A1": "000001", "A2": "000002", "A3": "000003"}
+    got = dict(bed.fetch_period(corp_map, 2025, "11011"))
+    assert got == {"000001": 100.0, "000002": 200.0, "000003": 300.0}
+
+
+def test_기간_수집_중_한도초과는_밖으로_전파된다(monkeypatch):
+    # 한도 초과를 삼키면 남은 기간이 조용히 0종목으로 채워진다. 병렬로 바뀌면서
+    # 예외가 워커 안에 갇히지 않는지 고정한다.
+    def fake_get(url, params=None, timeout=None):
+        return FakeResponse({"status": "020", "message": "사용한도를 초과하였습니다."})
+
+    monkeypatch.setattr(bed.requests, "get", fake_get)
+    corp_map = {f"A{i}": f"{i:06d}" for i in range(20)}
+    with pytest.raises(bed.QuotaExceeded):
+        list(bed.fetch_period(corp_map, 2025, "11011"))
