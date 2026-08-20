@@ -1,5 +1,6 @@
 # 한국 CANSLIM 판정용 데이터 로더를 검증하는 테스트
 import sys
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
@@ -108,6 +109,64 @@ def test_필수_파일이_없으면_명확한_오류로_멈춘다(tmp_path):
     (root / "screener/results.csv").unlink()
     with pytest.raises(FileNotFoundError, match="반드시 필요한 파일"):
         cl.load_all(root)
+
+
+def test_주가에서_0원_행이_걸러진다(tmp_path):
+    # 거래정지 종목은 high·low·close가 0인 행으로 남을 수 있다. 이게 그대로 들어오면
+    # 이동평균과 베이스 탐지가 예외도 경고도 없이 오염된다. 로더 파일명은
+    # date.today().year 기준으로 최근 PRICE_YEARS년만 읽으므로 올해 연도로 만든다.
+    root = 데이터셋_만들기(tmp_path)
+    (root / "prices").mkdir(parents=True, exist_ok=True)
+    this_year = date.today().year
+    pd.DataFrame({
+        "date": ["20260101", "20260102"],
+        "ticker": ["005930", "005930"],
+        "high": [71000.0, 0.0],
+        "low": [69000.0, 0.0],
+        "close": [70500.0, 0.0],
+        "volume": [1000.0, 0.0],
+    }).to_parquet(root / f"prices/{this_year}.parquet")
+
+    b = cl.load_all(root)
+
+    assert len(b.prices) == 1
+    row = b.prices.iloc[0]
+    assert row["high"] == 71000.0
+    assert row["low"] == 69000.0
+    assert row["close"] == 70500.0
+
+
+def test_주식수_스냅샷_중복은_최신_행만_남는다(tmp_path):
+    # 스냅샷이 쌓이면 같은 티커가 여러 asof로 중복된다. keep="last"가 아니면
+    # 옛 스냅샷 값이 잡혀 자사주 매입(주식수 감소) 판정이 조용히 틀어진다.
+    root = 데이터셋_만들기(tmp_path)
+    pd.DataFrame([
+        {"ticker": "005930", "asof": "20260101", "shares": 100.0,
+         "float_shares": 90.0, "market_cap": 1000.0, "shares_yoy": 1.0},
+        {"ticker": "005930", "asof": "20260816", "shares": 200.0,
+         "float_shares": 180.0, "market_cap": 2000.0, "shares_yoy": 2.0},
+    ]).to_parquet(root / "screener/shares_snapshot.parquet")
+
+    b = cl.load_all(root)
+
+    assert (b.shares.index == "005930").sum() == 1
+    assert b.shares.loc["005930", "shares"] == 200.0
+    assert b.shares.loc["005930", "shares_yoy"] == 2.0
+
+
+def test_애널리스트_스냅샷_중복은_최신_행만_남는다(tmp_path):
+    # shares_snapshot과 같은 관용구·같은 위험. keep="first"로 바뀌면 옛 기관 비중이
+    # 잡혀 I 항목 부가요소가 조용히 틀어진다.
+    root = 데이터셋_만들기(tmp_path)
+    pd.DataFrame([
+        {"ticker": "005930", "asof": "20260101", "held_pct_institutions": 0.1},
+        {"ticker": "005930", "asof": "20260816", "held_pct_institutions": 0.5},
+    ]).to_parquet(root / "analyst/snapshot.parquet")
+
+    b = cl.load_all(root)
+
+    assert (b.analyst.index == "005930").sum() == 1
+    assert b.analyst.loc["005930", "held_pct_institutions"] == 0.5
 
 
 def test_분기키는_연도와_분기를_정렬가능한_정수로_만든다():
