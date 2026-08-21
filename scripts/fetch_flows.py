@@ -3,10 +3,12 @@
 # I(기관 후원) 항목의 대용 지표다. 한국은 종목별 기관 보유 펀드 수가 공개되지 않아
 # "후원자의 수가 늘어나는 주식"을 순매수 추세의 방향성으로 대신 잡는다.
 #
-# pykrx 1.2.8부터 data.krx.co.kr 로그인이 필수다. KRX_ID·KRX_PW가 없으면
-# 모든 엔드포인트가 빈 응답을 주므로, 크래시 대신 메시지를 남기고 정상 종료한다.
-# 소비 측(canslim.py)은 파일이 없으면 I 항목을 데이터부족으로 처리한다.
+# pykrx 1.2.8부터 data.krx.co.kr 로그인이 필수다. KRX_ID·KRX_PW가 없으면 모든
+# 엔드포인트가 빈 응답을 주므로, 무엇을 등록해야 하는지 적은 메시지를 남기고
+# 0이 아닌 코드로 종료한다. 조용히 성공으로 끝내면 주간 워크플로가 초록으로 뜨는
+# 동안 수급 데이터가 얼어붙고, canslim.py는 그 위에 매일 asof를 오늘로 찍는다.
 import os
+import sys
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -39,7 +41,7 @@ def main():
     if not credentials_present():
         print("KRX_ID·KRX_PW 환경변수가 없어 기관 수급 수집을 건너뜁니다. "
               "data.krx.co.kr 계정을 GitHub Secrets에 등록하세요.")
-        return
+        sys.exit(1)
 
     from pykrx import stock  # 자격증명 확인 후에 import한다(모듈 로드 시 로그인을 시도한다).
 

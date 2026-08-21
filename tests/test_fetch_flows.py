@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import fetch_flows as ff
@@ -55,3 +56,14 @@ def test_자격증명_있으면_True(monkeypatch):
     monkeypatch.setenv("KRX_ID", "x")
     monkeypatch.setenv("KRX_PW", "y")
     assert ff.credentials_present() is True
+
+
+def test_자격증명이_없으면_0이_아닌_코드로_끝난다(monkeypatch, capsys):
+    # 조용히 성공으로 끝내면 주간 워크플로가 초록으로 뜨는 동안 수급 데이터가 얼어붙고,
+    # canslim.py는 몇 주 전 스냅샷 위에 매일 asof를 오늘로 찍는다. 사람이 볼 신호가 없다.
+    monkeypatch.delenv("KRX_ID", raising=False)
+    monkeypatch.delenv("KRX_PW", raising=False)
+    with pytest.raises(SystemExit) as e:
+        ff.main()
+    assert e.value.code != 0
+    assert "KRX_ID" in capsys.readouterr().out
