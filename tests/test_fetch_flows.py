@@ -1,5 +1,6 @@
 # 기관·외국인 순매수 변환 로직을 검증하는 테스트
 import sys
+import types
 from pathlib import Path
 
 import pandas as pd
@@ -67,3 +68,21 @@ def test_자격증명이_없으면_0이_아닌_코드로_끝난다(monkeypatch, 
         ff.main()
     assert e.value.code != 0
     assert "KRX_ID" in capsys.readouterr().out
+
+
+def test_수집_결과가_비면_0이_아닌_코드로_끝난다(monkeypatch, capsys):
+    # 로그인은 됐는데 모든 엔드포인트가 빈 응답을 주는 경우. 자격증명이 없을 때와
+    # 증상이 정확히 같다 — 조용히 성공하면 워크플로는 초록이고 수급 데이터는
+    # 지난주 스냅샷에 얼어붙는다. 파켓을 덮어쓰지 않고 죽는 것까지 확인한다.
+    monkeypatch.setenv("KRX_ID", "x")
+    monkeypatch.setenv("KRX_PW", "y")
+
+    빈_pykrx = types.ModuleType("pykrx")
+    빈_pykrx.stock = types.SimpleNamespace(
+        get_market_net_purchases_of_equities=lambda *a, **k: pd.DataFrame())
+    monkeypatch.setitem(sys.modules, "pykrx", 빈_pykrx)
+
+    with pytest.raises(SystemExit) as e:
+        ff.main()
+    assert e.value.code != 0
+    assert "수집된 행이 없습니다" in capsys.readouterr().out
