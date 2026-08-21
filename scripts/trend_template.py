@@ -28,6 +28,16 @@ OUT_DIR = DATA / "screener"
 
 CONDS = ["cond1", "cond2", "cond3", "cond4", "cond5", "cond6", "cond7", "cond8"]
 
+# results.csv에 실을 열. CANSLIM 판정이 여기서 close·high_52w·rs_rating·volume을 읽으므로
+# 이 목록에서 열이 빠지면 해당 항목이 조용히 미계산으로 떨어진다. tests/test_screener_contract.py가
+# 그 계약을 고정한다.
+OUT_COLS = [
+    "date", "ticker", "name", "market", "close", "volume",
+    "ma50", "ma150", "ma200", "low_52w", "high_52w",
+    "pct_above_low", "pct_below_high", "rs_rating", "rs_line_up",
+    *CONDS, "pass_count", "pass_all", "data_warning",
+]
+
 
 def load_prices() -> pd.DataFrame:
     # 이동평균(200일)·52주 고저 계산에 1년 이상 필요하므로 최근 3개 연도 파일을 로드한다.
@@ -142,14 +152,8 @@ def main():
     for col in ("ma50", "ma150", "ma200", "low_52w", "high_52w"):
         latest[col] = latest[col].round(0)
 
-    out_cols = [
-        "date", "ticker", "name", "market", "close",
-        "ma50", "ma150", "ma200", "low_52w", "high_52w",
-        "pct_above_low", "pct_below_high", "rs_rating", "rs_line_up",
-        *CONDS, "pass_count", "pass_all", "data_warning",
-    ]
     # 통과 우선 → 데이터 정상 우선 → RS 높은 순
-    result = latest[out_cols].sort_values(
+    result = latest[OUT_COLS].sort_values(
         ["pass_all", "data_warning", "rs_rating"], ascending=[False, True, False]
     ).reset_index(drop=True)
 
