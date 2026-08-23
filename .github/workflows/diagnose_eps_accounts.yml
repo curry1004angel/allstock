@@ -1,0 +1,41 @@
+name: DART 주당이익 계정명 진단
+
+# 1회성 진단. 데이터를 쓰지 않고 로그만 남긴다.
+# backfill_eps_dart.py의 계정명 정확 일치가 왜 6%만 건지는지 확인하기 위한 표본 조사다.
+
+on:
+  workflow_dispatch:
+    inputs:
+      year:
+        description: '조회 연도'
+        required: true
+        default: '2024'
+      quarter:
+        description: '기간'
+        required: true
+        default: '1Q'
+        type: choice
+        options: ['1Q', '2Q', '3Q', 'annual']
+      sample:
+        description: '표본 종목 수 (종목당 최대 2콜)'
+        required: true
+        default: '50'
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: 계정명 표본 조사
+        env:
+          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+        run: python scripts/diagnose_eps_accounts.py ${{ github.event.inputs.year }} ${{ github.event.inputs.quarter }} ${{ github.event.inputs.sample }}
