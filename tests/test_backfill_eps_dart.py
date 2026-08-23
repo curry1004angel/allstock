@@ -52,6 +52,65 @@ def test_주당이익이_없으면_None():
     assert bed.pick_eps([]) is None
 
 
+# --- 계정명 변형 (2024 1Q 표본 50종목 실측, diagnose_eps_accounts.py) ---
+# 정확 일치 시절 50종목 중 3종목(6%)만 걸렀다. 아래가 실제로 관측된 표기 전부다.
+
+기본_변형 = ["기본주당이익", "기본주당이익(손실)", "기본주당손실", "기본주당순손실",
+           "기본주당이익(손실) 합계", "기본주당이익(손실) (단위 : 원)",
+           "1. 기본주당이익", "보통주기본주당이익(손실)",
+           "기본 및 희석주당손익", "기본및희석주당순이익"]
+
+희석_변형 = ["희석주당이익", "희석주당이익(손실)", "희석주당손실", "희석주당순손실",
+           "희석주당이익(손실) (단위 : 원)", "2. 희석주당이익",
+           "보통주희석주당이익(손실)"]
+
+
+@pytest.mark.parametrize("name", 기본_변형)
+def test_표준코드가_없어도_기본주당이익_변형을_뽑는다(name):
+    assert bed.eps_kind(item(name, "100")) == "basic"
+    assert bed.pick_eps([item(name, "6,605")]) == 6605.0
+
+
+@pytest.mark.parametrize("name", 희석_변형)
+def test_표준코드가_없어도_희석주당이익_변형을_뽑는다(name):
+    assert bed.eps_kind(item(name, "100")) == "diluted"
+    assert bed.pick_eps([item(name, "90")]) == 90.0
+
+
+def test_계정명이_제각각이어도_표준코드로_판정한다():
+    # 실측된 17가지 계정명이 모두 이 두 ID로 수렴했다. 계정명은 보지 않아야 한다.
+    basic = {"account_id": bed.BASIC_EPS_ID, "account_nm": "무슨 이름이든",
+             "thstrm_amount": "1,000", "fs_div": "CFS"}
+    diluted = {"account_id": bed.DILUTED_EPS_ID, "account_nm": "",
+               "thstrm_amount": "900", "fs_div": "CFS"}
+    assert bed.pick_eps([diluted, basic]) == 1000.0
+
+
+def test_계속영업주당이익은_표준코드로_걸러진다():
+    # 계정명에 "주당이익"이 들어 있어 문자열로 긁으면 섞인다. ID가 달라 빠져야 한다.
+    계속영업 = {"account_id": "ifrs-full_BasicEarningsLossPerShareFromContinuingOperations",
+              "account_nm": "계속영업기본주당이익", "thstrm_amount": "500", "fs_div": "CFS"}
+    assert bed.eps_kind(계속영업) is None
+    assert bed.pick_eps([계속영업]) is None
+
+
+def test_계속영업주당이익은_표준코드가_없어도_걸러진다():
+    assert bed.eps_kind(item("계속영업기본주당이익", "500")) is None
+    assert bed.eps_kind(item("중단영업기본주당이익(손실)", "500")) is None
+
+
+def test_주당배당금과_주당순자산은_주당이익이_아니다():
+    assert bed.eps_kind(item("주당배당금", "500")) is None
+    assert bed.eps_kind(item("보통주주당순자산", "500")) is None
+
+
+def test_표준코드가_주당이익이_아니면_계정명을_보지_않는다():
+    # 표준코드를 쓰는 회사가 다른 계정에 헷갈리는 이름을 붙여도 새지 않아야 한다.
+    타계정 = {"account_id": "ifrs-full_ProfitLoss", "account_nm": "기본주당이익",
+            "thstrm_amount": "500", "fs_div": "CFS"}
+    assert bed.eps_kind(타계정) is None
+
+
 class FakeResponse:
     # requests.Response 흉내: fetch_one이 쓰는 .json()만 있으면 된다
     def __init__(self, payload):

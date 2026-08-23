@@ -15,6 +15,7 @@
 #     python scripts/backfill_eps_dart.py 2016 2017
 #     python scripts/backfill_eps_dart.py 2024 2026
 import os
+import re
 import sys
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -40,8 +41,17 @@ WORKERS = 8
 STATUS_COUNT = Counter()
 
 REPRT_CODES = {"1Q": "11013", "2Q": "11012", "3Q": "11014", "annual": "11011"}
-BASIC_EPS = "기본주당이익"
-DILUTED_EPS = "희석주당이익"
+
+# 주당이익은 계정명이 아니라 IFRS 표준계정코드로 찾는다.
+# 계정명은 회사마다 제각각이다. 2024 1Q 표본 50종목(diagnose_eps_accounts.py)에서
+# "기본주당이익(손실)", "기본주당손실", "1. 기본주당이익", "보통주기본주당이익(손실)",
+# "기본주당이익(손실) (단위 : 원)" 등 17가지가 나왔고, 정확 일치로는 3종목(6%)만
+# 걸러졌다. 같은 계정의 account_id는 아래 두 값뿐이라 하나도 놓치지 않았다.
+# 계정명 부분일치보다 ID 일치가 더 정확하기도 하다 — 계속영업주당이익은 ID가
+# ...FromContinuingOperations로 달라 저절로 빠지지만, "주당이익"으로 긁으면 섞인다.
+BASIC_EPS_ID = "ifrs-full_BasicEarningsLossPerShare"
+DILUTED_EPS_ID = "ifrs-full_DilutedEarningsLossPerShare"
+STANDARD_ID_PREFIXES = ("ifrs-full_", "ifrs_", "dart_")
 
 
 def parse_eps(val):
@@ -62,17 +72,43 @@ def parse_eps(val):
     return -v if neg else v
 
 
+def eps_kind(item):
+    """이 계정이 기본/희석 주당이익이면 "basic"/"diluted", 아니면 None.
+
+    표준계정코드를 먼저 본다. 표준코드를 쓰는데 주당이익이 아니면 즉시 탈락시킨다 —
+    계속영업/중단영업 주당이익이 계정명만 보면 걸려들기 때문이다. 표준코드를 아예
+    쓰지 않은 회사만 계정명으로 판정한다.
+    """
+    aid = str(item.get("account_id", "")).strip()
+    if aid == BASIC_EPS_ID:
+        return "basic"
+    if aid == DILUTED_EPS_ID:
+        return "diluted"
+    if aid.startswith(STANDARD_ID_PREFIXES):
+        return None
+
+    name = re.sub(r"\s+", "", str(item.get("account_nm", "")))
+    if "주당" not in name:
+        return None
+    if not any(w in name for w in ("이익", "손실", "손익")):
+        return None          # 주당배당금·주당순자산 등
+    if any(w in name for w in ("계속영업", "중단영업")):
+        return None
+    # "기본및희석주당순이익"처럼 둘을 합쳐 쓴 계정은 기본으로 본다(값이 같다).
+    return "diluted" if ("희석" in name and "기본" not in name) else "basic"
+
+
 def pick_eps(items):
     # 연결(CFS)을 별도(OFS)보다 우선하고, 기본주당이익을 희석주당이익보다 우선한다.
     best = None  # (우선순위, 값). 우선순위가 클수록 좋다.
     for it in items or []:
-        name = str(it.get("account_nm", "")).strip()
-        if name not in (BASIC_EPS, DILUTED_EPS):
+        kind = eps_kind(it)
+        if kind is None:
             continue
         v = parse_eps(it.get("thstrm_amount"))
         if v is None:
             continue
-        rank = (2 if name == BASIC_EPS else 1) * 10 + (2 if it.get("fs_div") == "CFS" else 1)
+        rank = (2 if kind == "basic" else 1) * 10 + (2 if it.get("fs_div") == "CFS" else 1)
         if best is None or rank > best[0]:
             best = (rank, v)
     return best[1] if best else None
