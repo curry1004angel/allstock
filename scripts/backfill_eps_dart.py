@@ -14,6 +14,11 @@
 # 사용법:
 #     python scripts/backfill_eps_dart.py 2016 2017
 #     python scripts/backfill_eps_dart.py 2024 2026
+#     python scripts/backfill_eps_dart.py 2024 2024 2Q,3Q   # 기간을 골라서
+#
+# 기간을 고르는 이유는 할당량이다. 이미 찬 기간을 다시 받으면 그만큼 다른 연도를
+# 못 받는다. 2024는 1Q와 연간이 97%·2682종목으로 이미 차 있어 2Q·3Q만 받으면
+# 5400콜이 남고, 그 여유로 2023 한 해를 같은 날에 끝낼 수 있다.
 import os
 import re
 import sys
@@ -165,19 +170,33 @@ def fetch_period(corp_map, year, reprt):
             raise
 
 
+def parse_periods(arg):
+    """"2Q,3Q" → {"2Q": "11012", "3Q": "11014"}. 비어 있으면 전 기간."""
+    names = [s.strip() for s in str(arg).split(",") if s.strip()]
+    if not names:
+        return dict(REPRT_CODES)
+    unknown = [n for n in names if n not in REPRT_CODES]
+    if unknown:
+        raise SystemExit(f"모르는 기간: {unknown}. 쓸 수 있는 값: "
+                         f"{list(REPRT_CODES)}")
+    return {n: REPRT_CODES[n] for n in names}
+
+
 def main():
     if not DART_API_KEY:
         raise SystemExit("DART_API_KEY 환경변수가 없어 백필을 실행할 수 없습니다.")
     if len(sys.argv) < 3:
-        raise SystemExit("사용법: python scripts/backfill_eps_dart.py <시작연도> <종료연도>")
+        raise SystemExit("사용법: python scripts/backfill_eps_dart.py "
+                         "<시작연도> <종료연도> [기간,기간]")
     y_from, y_to = int(sys.argv[1]), int(sys.argv[2])
+    periods = parse_periods(sys.argv[3] if len(sys.argv) > 3 else "")
 
     from fetch_financials import get_corp_code_map, update_parquet  # 키 확인 뒤 지연 import
 
     corp_map = get_corp_code_map(DART_API_KEY)
     print(f"corp_code {len(corp_map)}건 로드, {y_from}~{y_to} 백필 시작", flush=True)
-    per_year = len(corp_map) * len(REPRT_CODES)
-    print(f"  예상 호출 약 {per_year * (y_to - y_from + 1)}건 "
+    per_year = len(corp_map) * len(periods)
+    print(f"  기간 {list(periods)} / 예상 호출 약 {per_year * (y_to - y_from + 1)}건 "
           f"(연도당 {per_year}건, 일일 한도 20000건)", flush=True)
 
     def save(q_rows, a_rows):
@@ -190,7 +209,7 @@ def main():
 
     calls = 0
     for year in range(y_from, y_to + 1):
-        for quarter, reprt in REPRT_CODES.items():
+        for quarter, reprt in periods.items():
             # 기간 단위로 즉시 저장한다. 한 번에 모아 마지막에 쓰면 한도 초과나
             # 잡 제한시간(350분)에 걸렸을 때 그때까지 받은 것이 전부 날아간다.
             q_rows, a_rows, got = [], [], 0
@@ -207,7 +226,13 @@ def main():
             except QuotaExceeded as e:
                 print(f"  {year} {quarter}: 한도 초과로 중단 ({got}종목까지 수집) — {e}", flush=True)
                 save(q_rows, a_rows)
-                print(f"중단: 호출 {calls}건. 내일 `{year} {y_to}` 범위로 다시 실행하세요.", flush=True)
+                names = list(periods)
+                left = ",".join(names[names.index(quarter):])
+                print(f"중단: 호출 {calls}건. 내일 `{year} {year} {left}`로 "
+                      f"이 연도를 마치세요.", flush=True)
+                if year < y_to:
+                    print(f"  그다음 `{year + 1} {y_to} {','.join(names)}`.",
+                          flush=True)
                 return
             print(f"  {year} {quarter}: {got}종목 (누적 호출 {calls}, status {dict(STATUS_COUNT)})",
                   flush=True)

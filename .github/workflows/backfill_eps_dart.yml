@@ -13,6 +13,12 @@ on:
         description: '종료 연도 (일일 한도 때문에 시작 연도와 같게 두는 것을 권장)'
         required: true
         default: '2026'
+      periods:
+        # 이미 찬 기간을 다시 받으면 그만큼 다른 연도를 못 받는다. 2024는 1Q와
+        # 연간이 이미 차 있어 2Q,3Q만 받으면 그날 2023 한 해가 더 들어간다.
+        description: '기간 (쉼표 구분: 1Q,2Q,3Q,annual). 비우면 전 기간'
+        required: false
+        default: ''
 
 jobs:
   backfill:
@@ -31,7 +37,7 @@ jobs:
       - name: 주당이익 백필
         env:
           DART_API_KEY: ${{ secrets.DART_API_KEY }}
-        run: python scripts/backfill_eps_dart.py ${{ github.event.inputs.year_from }} ${{ github.event.inputs.year_to }}
+        run: python scripts/backfill_eps_dart.py ${{ github.event.inputs.year_from }} ${{ github.event.inputs.year_to }} "${{ github.event.inputs.periods }}"
 
       - name: 변화율 재계산
         run: python scripts/calculate_changes.py
@@ -41,6 +47,6 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add data/financials/
-          git diff --staged --quiet || git commit -m "주당이익 백필: ${{ github.event.inputs.year_from }}~${{ github.event.inputs.year_to }}"
+          git diff --staged --quiet || git commit -m "주당이익 백필: ${{ github.event.inputs.year_from }}~${{ github.event.inputs.year_to }} ${{ github.event.inputs.periods }}"
           git pull --rebase
           git push

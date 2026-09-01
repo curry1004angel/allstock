@@ -200,6 +200,29 @@ def test_DART_API_KEY가_없으면_main이_argv_파싱_전에_막힌다(monkeypa
     assert "DART_API_KEY" in str(exc_info.value)
 
 
+def test_기간을_안_주면_전_기간이다():
+    assert bed.parse_periods("") == bed.REPRT_CODES
+    assert bed.parse_periods("  ") == bed.REPRT_CODES
+
+
+def test_고른_기간만_준다():
+    # 이미 찬 기간을 다시 받으면 그만큼 다른 연도를 못 받는다.
+    got = bed.parse_periods("2Q,3Q")
+    assert list(got) == ["2Q", "3Q"]
+    assert got["2Q"] == bed.REPRT_CODES["2Q"]
+
+
+def test_기간_이름의_공백을_무시한다():
+    assert list(bed.parse_periods(" 1Q , annual ")) == ["1Q", "annual"]
+
+
+def test_모르는_기간은_막는다():
+    # 오타를 조용히 넘기면 그 기간이 통째로 안 받아진 채 성공으로 끝난다.
+    with pytest.raises(SystemExit) as e:
+        bed.parse_periods("2Q,4Q")
+    assert "4Q" in str(e.value)
+
+
 def test_기간_수집은_전_종목을_돌려준다(monkeypatch):
     # 병렬 수집으로 바꾼 뒤에도 종목이 누락되지 않아야 한다. 완료 순서가 뒤섞이므로
     # 순서가 아니라 집합으로 비교한다.
