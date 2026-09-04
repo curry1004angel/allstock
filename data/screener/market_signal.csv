@@ -1,3 +1,3 @@
 ﻿asof,index_code,close,change_pct,above_ma50,above_ma200,ma200_rising,distribution_days,stall_days,signal,advice,top20_avg_change
-20260903,KS11,6579.48,0.26,False,True,True,4,0건,주의,신규 진입 축소,0.27
-20260903,KQ11,790.21,-1.71,False,False,False,4,0건,주의,신규 진입 축소,0.27
+20260904,KS11,6687.21,1.64,False,True,True,4,0건,주의,신규 진입 축소,2.33
+20260904,KQ11,813.5,2.95,True,False,False,4,0건,주의,신규 진입 축소,2.33
